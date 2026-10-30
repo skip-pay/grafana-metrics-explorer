@@ -37,6 +37,7 @@ const SYNTAX: Array<[string, string]> = [
   ['a:1 OR b:2', 'either filter'],
   ['NOT (a:1 OR b:2)', 'neither; NOT binds tighter than AND, AND than OR'],
   ['a:1 AND (b:2 OR c:3)', 'parentheses group filters'],
+  ['OR b:2 after a chip', 'joins the last chip: (a:1 OR b:2)'],
 ];
 
 /** A term for the token, a value of an IN list, an operator, or the whole text as typed. */
@@ -44,7 +45,7 @@ type Option =
   | { kind: 'pair'; match: TagMatch }
   | { kind: 'value'; value: string; ranges: Array<[number, number]> }
   | { kind: 'keyword'; keyword: string }
-  | { kind: 'custom'; text: string };
+  | { kind: 'custom'; text: string; label: string };
 
 interface PairsState {
   key: string;
@@ -133,7 +134,7 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
           id: `custom-${i}`,
           content: (
             <span className={styles.custom}>
-              Add filter <code>{option.text}</code>
+              Add filter <code>{option.label}</code>
             </span>
           ),
         };
@@ -148,29 +149,24 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
   };
 
   const add = (added: FilterItem[]) => {
-    const seen = new Set(filters.map((f) => JSON.stringify(f)));
-    const fresh = added.filter((f) => {
-      const id = JSON.stringify(f);
-      if (seen.has(id)) {
-        return false;
-      }
-      seen.add(id);
-      return true;
-    });
-    if (fresh.length > 0) {
-      onChange([...filters, ...fresh]);
+    const next = appendNew(filters, added);
+    if (next.length > filters.length) {
+      onChange(next);
     }
     edit('');
   };
 
   const commit = (value: string) => {
-    const parsed = parseScopeText(value);
-    if ('error' in parsed) {
+    const next = committed(value, filters);
+    if ('error' in next) {
       edit(value);
-      setError(parsed.error);
+      setError(next.error);
       return;
     }
-    add(parsed);
+    if (!sameFilters(next, filters)) {
+      onChange(next);
+    }
+    edit('');
   };
 
   /**
@@ -512,11 +508,51 @@ function closedAfter(rest: string): boolean {
   return false;
 }
 
-/** "Add filter" with the whole text, when it is a valid filter. */
-function addOption(text: string): Option[] {
+/** `OR …` or `AND …` typed after the chips. */
+const LEADING = /^(AND|OR)(?=[\s(]|$)([\s\S]*)$/;
+
+/** `filters` and the items of `added` that are not among them yet. */
+function appendNew(filters: FilterItem[], added: FilterItem[]): FilterItem[] {
+  const seen = new Set(filters.map((f) => JSON.stringify(f)));
+  const fresh = added.filter((f) => {
+    const id = JSON.stringify(f);
+    if (seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+  return [...filters, ...fresh];
+}
+
+const sameFilters = (a: FilterItem[], b: FilterItem[]) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The filters once `value` is committed. Its filters become chips; typed after the chips, `OR …` joins the last chip
+ * instead (`a:1`, then `OR b:2`, gives `(a:1 OR b:2)`) and `AND …` adds chips, as a comma does.
+ */
+function committed(value: string, filters: FilterItem[]): FilterItem[] | { error: string } {
+  const lead = filters.length > 0 ? LEADING.exec(value.trim()) : null;
+  if (lead && lead[2].trim() === '') {
+    return { error: `Expected a filter after "${lead[1]}"` };
+  }
+  if (lead?.[1] === 'OR') {
+    const joined = parseScopeText(`${filterToText(filters[filters.length - 1])} OR ${lead[2]}`);
+    return 'error' in joined ? joined : [...filters.slice(0, -1), ...joined];
+  }
+  const parsed = parseScopeText(lead ? lead[2] : value);
+  return 'error' in parsed ? parsed : appendNew(filters, parsed);
+}
+
+/** "Add filter" with the whole text when committing it changes the filters; an OR joining the last chip shows the result. */
+function addOption(text: string, filters: FilterItem[]): Option[] {
   const whole = text.trim();
-  const parsed = parseScopeText(whole);
-  return 'error' in parsed || parsed.length === 0 ? [] : [{ kind: 'custom', text: whole }];
+  const next = whole === '' ? undefined : committed(whole, filters);
+  if (!next || 'error' in next || sameFilters(next, filters)) {
+    return [];
+  }
+  const joins = filters.length > 0 && LEADING.exec(whole)?.[1] === 'OR';
+  return [{ kind: 'custom', text: whole, label: joins ? filterToText(next[next.length - 1]) : whole }];
 }
 
 /**
@@ -532,7 +568,7 @@ function buildOptions(text: string, caret: number, pairs: TagPair[], filters: Fi
   const closable = typing.open > 0 && !closedAfter(text.slice(caret));
   if (typing.inKey !== undefined) {
     // In a list closed after the caret, Enter adds the whole text instead of closing it.
-    const done: Option[] = closable ? [{ kind: 'keyword', keyword: ')' }] : addOption(text);
+    const done: Option[] = closable ? [{ kind: 'keyword', keyword: ')' }] : addOption(text, filters);
     return valueOptions(typing.inKey, unquote(token.trim()), typing.listed, pairs, done);
   }
   const tail = /^([\s\S]*\S)\s+(\S*)$/.exec(token);
@@ -546,6 +582,11 @@ function buildOptions(text: string, caret: number, pairs: TagPair[], filters: Fi
       : [];
 
   const query = token.trim();
+  // The start of an operator joining the chips, e.g. "O" for "OR".
+  const leading: Option[] =
+    filters.length > 0 && head.slice(0, typing.start).trim() === '' && /^[A-Z]+$/.test(query)
+      ? ['OR', 'AND'].filter((k) => k.startsWith(query)).map((keyword) => ({ kind: 'keyword', keyword }))
+      : [];
   const negated = query.startsWith('!');
   const used = new Set(
     topLevelFilters(filters)
@@ -568,19 +609,13 @@ function buildOptions(text: string, caret: number, pairs: TagPair[], filters: Fi
 
   const whole = text.trim();
   const named = !finish && matches.some((m) => textOf(m) === whole);
-  const parsed = whole !== '' && !named ? parseScopeText(whole) : [];
-  if ('error' in parsed || parsed.length === 0) {
-    return [...keywords, ...options];
-  }
-  const single = parsed.length === 1 && !isFilterGroup(parsed[0]) ? parsed[0] : undefined;
-  if (single && used.has(chipLabel(single))) {
-    return [...keywords, ...options];
-  }
-  const custom: Option = { kind: 'custom', text: whole };
+  const custom = named ? [] : addOption(whole, filters);
   if (finish) {
-    return [custom, ...keywords, ...options];
+    return [...custom, ...keywords, ...options];
   }
-  return /[*(]/.test(query) ? [...keywords, custom, ...options] : [...keywords, ...options, custom];
+  return /[*(]/.test(query)
+    ? [...leading, ...keywords, ...custom, ...options]
+    : [...leading, ...keywords, ...options, ...custom];
 }
 
 /** Values of an IN list's key not listed yet, and `done` (")" or "Add filter"): first once the value is a known one. */

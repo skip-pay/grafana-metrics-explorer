@@ -183,6 +183,20 @@ describe('parseQueryText', () => {
     });
   });
 
+  it('reads by {…} after or between the modifiers too', () => {
+    expect(parse('sum:m{env:prod}.as_count() by {path}')).toMatchObject({
+      groupBy: ['path'],
+      functions: [{ name: 'as_count', args: [] }],
+    });
+    expect(parse('sum:m{*}.as_rate() by {a,b}.rollup(sum, 60)')).toMatchObject({
+      groupBy: ['a', 'b'],
+      functions: [
+        { name: 'as_rate', args: [] },
+        { name: 'rollup', args: ['sum', 60] },
+      ],
+    });
+  });
+
   it('reads boolean scopes with AND, OR, NOT and parentheses', () => {
     expect(parse('sum:m{env:prod AND (service:api OR service:worker), !status:5*} by {path}')).toMatchObject({
       filters: [eq('env', 'prod'), or(eq('service', 'api'), eq('service', 'worker')), neq('status', '5*')],
@@ -213,6 +227,7 @@ describe('parseQueryText', () => {
     ['avg:m{$env}', 'Template variables are not supported'],
     ['avg:m{*} by {bad-key}', 'Invalid tag key "bad-key"'],
     ['avg:m{*} extra', 'Unexpected text after the query'],
+    ['avg:m{*} by {a}.as_count() by {b}', 'Unexpected text after the query: "by {b}"'],
     ['avg:m{*}.as_count', 'Expected "(" at the end'],
     ["top(avg:m{*}, 'mean)", 'Unterminated string'],
   ])('rejects %j', (text, message) => {

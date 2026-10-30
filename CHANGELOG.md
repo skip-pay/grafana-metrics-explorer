@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- In the `from` field, `OR …` typed after the chips joins the last chip, e.g. `(service:api OR service:worker)`,
+  and `AND …` adds a chip; typing `O` or `A` there offers the operator. Before, the text failed with "Expected a
+  filter before OR".
+- The query text and `q` links accept `by {…}` after the modifiers too: `sum:m{*}.as_count() by {service}`.
+
 ## 0.2.0
 
 - Boolean tag filters: combine terms with `AND`, `OR`, `NOT` and parentheses in the `from` field, the query text

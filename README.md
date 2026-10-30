@@ -72,7 +72,7 @@ The plugin is not signed, so Grafana loads it only when its id is listed in `all
 ```ini
 [plugins]
 allow_loading_unsigned_plugins = skippay-metricsexplorer-panel
-preinstall = skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip
+preinstall = skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip
 ```
 
 The same as environment variables: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS` and `GF_PLUGINS_PREINSTALL`. Both
@@ -96,7 +96,7 @@ deprecated `GF_INSTALL_PLUGINS`):
 grafana.ini:
   plugins:
     allow_loading_unsigned_plugins: skippay-metricsexplorer-panel
-    preinstall: skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip
+    preinstall: skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip
 ```
 
 ### Docker
@@ -104,18 +104,18 @@ grafana.ini:
 ```bash
 docker run -d -p 127.0.0.1:3000:3000 \
   -e GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=skippay-metricsexplorer-panel \
-  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip \
+  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip \
   grafana/grafana:13.1.1
 ```
 
 ### Grafana CLI or by hand
 
 ```bash
-grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip \
+grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip \
   plugins install skippay-metricsexplorer-panel
 ```
 
-Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.2.0.zip.sha256`, unzip it into
+Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.2.1.zip.sha256`, unzip it into
 Grafana's plugin directory (`/var/lib/grafana/plugins` by default) and restart Grafana.
 
 ## Creating the dashboard
@@ -163,7 +163,8 @@ within the panel's maximum range.
   and `)` after a complete term and a space, where Enter closes the open parenthesis or adds the text. Enter adds
   the text once its parentheses are closed; a group becomes one chip such as `(service:api OR service:worker)`, and
   a click on a chip turns it back into text. In this field a comma outside parentheses always ends a chip, so
-  `a:1 OR b:2, c:3` typed here means `(a:1 OR b:2), c:3`.
+  `a:1 OR b:2, c:3` typed here means `(a:1 OR b:2), c:3`. Typed after the chips, `OR …` joins the last chip
+  (`service:api`, then `OR service:worker`, gives `(service:api OR service:worker)`) and `AND …` adds a chip.
 
 - **avg by**: the space aggregation (`avg`, `sum`, `min`, `max`; distributions add `count` and `p50`…`p99`) and the
   tags to group by. Counters start as `sum by` and show an `as count | rate` switch.
@@ -186,7 +187,7 @@ The `</>` mode and the [`q` link parameter](#deep-links) use this form:
   `NOT` and parentheses: `{env:prod AND (service:api OR service:worker), !status:5*}`. A comma is `AND` here, so
   `{a:1 OR b:2, c:3}` is `a:1 OR (b:2 AND c:3)`; the explorer writes groups in parentheses. Quote values that
   contain `,`, `{`, `}`, `(`, `)`, `"`, `\` or a separate word `AND` or `OR`: `path:"/a,b"`.
-- `by {…}` is optional.
+- `by {…}` is optional; it may also follow the modifiers (`….as_count() by {service}`).
 - Dotted modifiers follow the query: `.as_count()`, `.as_rate()`, `.rollup(<agg>, <seconds>)` (or `.rollup(60)`),
   `.fill(<method>, <limit>)`.
 - Every other function wraps the query, innermost first: `abs(timeshift(avg:m{*}, -3600))`. String arguments may be

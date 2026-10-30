@@ -188,33 +188,44 @@ class Parser {
     if ('error' in filters) {
       return this.fail(filters.error);
     }
-    const groupBy: string[] = [];
-    const save = this.i;
-    if (this.ident() === 'by') {
-      this.expect('{');
-      for (const raw of this.balanced('}').split(',')) {
-        const key = raw.trim();
-        if (!isValidLabelKey(key)) {
-          return this.fail(`Invalid tag key "${key}" in by {…}`);
-        }
-        groupBy.push(key);
-      }
-    } else {
-      this.i = save;
-    }
+    // `by {…}` may also come after or between the modifiers: `m{*}.as_count() by {x}`.
+    let groupBy: string[] | undefined;
     const functions: FunctionCall[] = [];
-    while (this.peek() === '.') {
-      this.i++;
-      const mod = this.ident();
-      if (!isDottedModifier(mod)) {
-        return this.fail(`Unknown modifier .${mod}()`);
+    for (;;) {
+      if (this.peek() === '.') {
+        this.i++;
+        const mod = this.ident();
+        if (!isDottedModifier(mod)) {
+          return this.fail(`Unknown modifier .${mod}()`);
+        }
+        this.expect('(');
+        const args = this.peek() === ')' ? [] : [this.arg(), ...this.args()];
+        this.expect(')');
+        functions.push(this.call(mod, args));
+        continue;
       }
-      this.expect('(');
-      const args = this.peek() === ')' ? [] : [this.arg(), ...this.args()];
-      this.expect(')');
-      functions.push(this.call(mod, args));
+      const save = this.i;
+      if (groupBy === undefined && this.ident() === 'by') {
+        groupBy = this.groupBy();
+        continue;
+      }
+      this.i = save;
+      break;
     }
-    return { metric, spaceAgg, filters, groupBy, functions };
+    return { metric, spaceAgg, filters, groupBy: groupBy ?? [], functions };
+  }
+
+  groupBy(): string[] {
+    this.expect('{');
+    const keys: string[] = [];
+    for (const raw of this.balanced('}').split(',')) {
+      const key = raw.trim();
+      if (!isValidLabelKey(key)) {
+        return this.fail(`Invalid tag key "${key}" in by {…}`);
+      }
+      keys.push(key);
+    }
+    return keys;
   }
 }
 

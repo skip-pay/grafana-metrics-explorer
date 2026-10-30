@@ -246,6 +246,60 @@ describe('TagFilterField', () => {
       ]);
     });
 
+    it('joins the last chip with OR typed after the chips and adds chips with AND', async () => {
+      const { input, onChange } = setup([
+        { key: 'path', op: 'eq', values: ['/orders'] },
+        { key: 'environment', op: 'eq', values: ['prod'] },
+      ]);
+      await focus(input);
+      type(input, 'O');
+      expect(options()[0]).toBe('OR');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('OR ');
+
+      type(input, 'OR stag');
+      expect(options()).toEqual(['environment:staging']);
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        { key: 'path', op: 'eq', values: ['/orders'] },
+        {
+          op: 'or',
+          items: [
+            { key: 'environment', op: 'eq', values: ['prod'] },
+            { key: 'environment', op: 'eq', values: ['staging'] },
+          ],
+        },
+      ]);
+      expect(input).toHaveValue('');
+      expect(chipTexts()).toEqual(['path:/orders', '(environment:prod OR environment:staging)']);
+
+      type(input, 'OR path:/x');
+      expect(options()).toEqual(['Add filter (environment:prod OR environment:staging OR path:/x)']);
+      type(input, 'AND path:/x');
+      expect(options()).toEqual(['Add filter AND path:/x']);
+      await press(input, 'Enter');
+      expect(chipTexts()).toEqual(['path:/orders', '(environment:prod OR environment:staging)', 'path:/x']);
+    });
+
+    it('needs a filter after a leading operator and a chip before OR', async () => {
+      const { input, onChange } = setup([{ key: 'path', op: 'eq', values: ['/orders'] }]);
+      await focus(input);
+      type(input, 'AND ');
+      await press(input, 'Escape');
+      await press(input, 'Enter');
+      expect(screen.getByText('Expected a filter after "AND"')).toBeInTheDocument();
+
+      await press(input, 'Backspace');
+      type(input, '');
+      await press(input, 'Backspace');
+      expect(chipTexts()).toEqual([]);
+      type(input, 'OR path:/x');
+      expect(options()).toEqual([]);
+      await press(input, 'Enter');
+      expect(screen.getByText('Expected a filter before "OR"')).toBeInTheDocument();
+      expect(onChange).toHaveBeenLastCalledWith([]);
+    });
+
     it("suggests the key's values inside IN (…) and closes the list after a known value", async () => {
       const { input, onChange } = setup();
       await focus(input);

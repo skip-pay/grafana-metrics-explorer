@@ -25,7 +25,11 @@ jest.mock('@grafana/runtime', () => ({
 }));
 jest.mock('@grafana/ui', () => ({ useTheme2: () => ({ isDark: false }) }));
 jest.mock('../catalog', () => ({ getCatalog: () => mockCatalog }));
-jest.mock('../compile', () => ({ compile: jest.fn(), GROUP_LIMIT: 200 }));
+jest.mock('../compile', () => ({
+  compile: jest.fn(),
+  GROUP_LIMIT: 200,
+  topLevelFilters: jest.requireActual('../compile/filters').topLevelFilters,
+}));
 jest.mock('../engine', () => ({ evaluate: jest.fn(), buildCharts: jest.fn() }));
 
 const compileMock = compile as jest.Mock;
@@ -189,15 +193,23 @@ describe('useExplorerData', () => {
     expect(mockRunner.runs[1].queries[0]).toMatchObject({ expr: 'avg(cpu by host)' });
   });
 
+  // The group in the filter is left out of the estimate, which is then an upper bound.
   it('estimates groups from the label values and caps a query above the limit', async () => {
     const values = (n: number) => Array.from({ length: n }, (_, i) => `v${i}`);
     mockCatalog.labelValues.mockImplementation((_m, key: string) =>
       Promise.resolve(values(key === 'host' ? 30 : key === 'path' ? 10 : 3))
     );
-    const state = stateWith(
-      { metric: 'cpu', groupBy: ['host', 'path'], filters: [{ key: 'env', op: 'eq', values: ['prod'] }] },
-      { metric: 'mem', groupBy: ['env'] }
-    );
+    const filters: MetricQuery['filters'] = [
+      { key: 'env', op: 'eq', values: ['prod'] },
+      {
+        op: 'or',
+        items: [
+          { key: 'path', op: 'eq', values: ['/a'] },
+          { key: 'host', op: 'eq', values: ['h1'] },
+        ],
+      },
+    ];
+    const state = stateWith({ metric: 'cpu', groupBy: ['host', 'path'], filters }, { metric: 'mem', groupBy: ['env'] });
     const { result } = renderHook(() => useExplorerData(state, args()));
     await flush();
     act(() => jest.advanceTimersByTime(0));

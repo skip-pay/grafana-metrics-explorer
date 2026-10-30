@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Boolean tag filters: combine terms with `AND`, `OR`, `NOT` and parentheses in the `from` field, the query text
+  and `q` links, e.g. `{env:prod AND (service:api OR service:worker), !status:5*}`. `NOT` is pushed down to the
+  matchers; an OR becomes one regex matcher when its branches differ only in the values of one key, else PromQL `or`
+  of the metric reads before the space aggregation, for every metric kind. A filter may have at most 16 branches.
+- The `from` field suggests tag values for the term at the cursor, also inside `(` and as the values of
+  `key IN (`, and offers `AND`, `OR` and `)` after a complete term. A group is one chip; click it to edit its text.
+- `mx` states of 0.1.0 load unchanged. In `q` links and the query text, values that contain parentheses or a
+  separate word `AND` or `OR` must now be quoted.
+
 ## 0.1.0
 
 Initial release.

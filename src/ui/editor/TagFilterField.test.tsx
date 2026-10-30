@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { Catalog, TagPair } from '../../catalog';
-import { ResolvedMetric, TagFilter } from '../../model/types';
+import { FilterItem, ResolvedMetric } from '../../model/types';
 import { TagFilterField } from './TagFilterField';
 
 jest.mock('../../catalog', () => ({
@@ -17,20 +17,6 @@ jest.mock('../../catalog', () => ({
       .slice(0, limit)
       .map(({ pair, at }) => ({ pair, negated, score: 1, ranges: [[at, at + q.length]] }));
   },
-}));
-
-jest.mock('../../compile', () => ({
-  parseFilterText: (text: string) => {
-    const negated = text.startsWith('!');
-    const body = negated ? text.slice(1) : text;
-    const colon = body.indexOf(':');
-    if (colon <= 0 || colon === body.length - 1) {
-      return { error: `Expected key:value, got "${text}"` };
-    }
-    return { key: body.slice(0, colon), op: negated ? 'neq' : 'eq', values: [body.slice(colon + 1)] };
-  },
-  filterToText: (f: { key: string; op: string; values: string[] }) =>
-    `${f.op === 'neq' ? '!' : ''}${f.key}:${f.values[0]}`,
 }));
 
 const resolved: ResolvedMetric = {
@@ -49,7 +35,7 @@ const PAIRS: TagPair[] = [
   { key: 'path', value: '/orders' },
 ];
 
-function setup(initial: TagFilter[] = []) {
+function setup(initial: FilterItem[] = []) {
   const onChange = jest.fn();
   // The first batch arrives through onProgress, the rest with the promise.
   const tagPairs = jest.fn((_m: unknown, _f: unknown, _r: unknown, onProgress?: (pairs: TagPair[]) => void) => {
@@ -189,5 +175,305 @@ describe('TagFilterField', () => {
     const { input } = setup([{ key: 'environment', op: 'eq', values: ['prod'] }]);
     await focus(input);
     expect(options()).toEqual(['path:/orders', 'environment:staging']);
+  });
+
+  describe('boolean filters', () => {
+    const type = (input: HTMLElement, value: string) => fireEvent.change(input, { target: { value } });
+
+    it('suggests terms for the token after "(", AND, OR and NOT', async () => {
+      const { input } = setup();
+      await focus(input);
+      type(input, '(');
+      expect(options()).toEqual(['path:/orders', 'environment:prod', 'environment:staging']);
+      type(input, '(path:/orders OR stag');
+      expect(options()).toEqual(['environment:staging']);
+      type(input, 'path:/orders AND NOT (pro');
+      expect(options()).toEqual(['environment:prod']);
+    });
+
+    it('keeps editing when a pick leaves a group open and offers ")", AND and OR after a term', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, '(stag');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('(environment:staging ');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(options()).toEqual([')', 'AND', 'OR']);
+
+      await press(input, 'ArrowDown');
+      await press(input, 'ArrowDown');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('(environment:staging OR ');
+      type(input, '(environment:staging OR prod');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('(environment:staging OR environment:prod ');
+
+      // ")" closes the last open group, so the pick commits the chip.
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        {
+          op: 'or',
+          items: [
+            { key: 'environment', op: 'eq', values: ['staging'] },
+            { key: 'environment', op: 'eq', values: ['prod'] },
+          ],
+        },
+      ]);
+      expect(input).toHaveValue('');
+      expect(chipTexts()).toEqual(['(environment:staging OR environment:prod)']);
+    });
+
+    it('offers the operators matching a typed prefix and commits an OR at the top level as one chip', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, 'environment:prod ');
+      expect(options().slice(0, 3)).toEqual(['Add filter environment:prod', 'AND', 'OR']);
+      type(input, 'environment:prod O');
+      expect(options()[0]).toBe('OR');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('environment:prod OR ');
+
+      type(input, 'environment:prod OR /ord');
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        {
+          op: 'or',
+          items: [
+            { key: 'environment', op: 'eq', values: ['prod'] },
+            { key: 'path', op: 'eq', values: ['/orders'] },
+          ],
+        },
+      ]);
+    });
+
+    it("suggests the key's values inside IN (…) and closes the list after a known value", async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, 'environment IN (');
+      expect(options()).toEqual(['prod', 'staging']);
+      type(input, 'environment NOT IN (prod, ');
+      expect(options()).toEqual(['staging']);
+      type(input, 'environment IN (st');
+      expect(options()).toEqual(['staging', ')']);
+
+      await press(input, 'Enter');
+      expect(input).toHaveValue('environment IN (staging');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(options()).toEqual([')']);
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([{ key: 'environment', op: 'in', values: ['staging'] }]);
+    });
+
+    it('keeps an IN list inside a group open after a value pick', async () => {
+      const { input } = setup();
+      await focus(input);
+      type(input, '(path:/orders OR environment IN (pr');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('(path:/orders OR environment IN (prod');
+      await press(input, 'Enter');
+      expect(input).toHaveValue('(path:/orders OR environment IN (prod) ');
+      expect(options().slice(0, 3)).toEqual([')', 'AND', 'OR']);
+    });
+
+    it('commits with Enter after a complete expression and a space, and types on to a pair after a group', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, '(path:/a OR path:/b) ');
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        {
+          op: 'or',
+          items: [
+            { key: 'path', op: 'eq', values: ['/a'] },
+            { key: 'path', op: 'eq', values: ['/b'] },
+          ],
+        },
+      ]);
+
+      type(input, '(path:/a OR path:/b) AND environment:stag');
+      expect(options()[0]).toBe('environment:staging');
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({ op: 'or' }),
+        { key: 'environment', op: 'eq', values: ['staging'] },
+      ]);
+    });
+
+    it('commits a typed expression with Enter, one chip per top-level AND item', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, 'environment:prod AND (path:/a OR path:/b)');
+      expect(options()[0]).toBe('Add filter environment:prod AND (path:/a OR path:/b)');
+      await press(input, 'Enter');
+      expect(onChange).toHaveBeenLastCalledWith([
+        { key: 'environment', op: 'eq', values: ['prod'] },
+        {
+          op: 'or',
+          items: [
+            { key: 'path', op: 'eq', values: ['/a'] },
+            { key: 'path', op: 'eq', values: ['/b'] },
+          ],
+        },
+      ]);
+      expect(chipTexts()).toEqual(['environment:prod', '(path:/a OR path:/b)']);
+    });
+
+    it('does not commit on a comma inside parentheses, and shows the error of unbalanced text', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, '(environment:prod');
+      fireEvent.keyDown(input, { key: ',' });
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(input, { key: 'Escape' });
+      await press(input, 'Enter');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText('Missing ")"')).toBeInTheDocument();
+      expect(input).toHaveValue('(environment:prod');
+    });
+
+    it('shows a group as one chip, marks an unknown key in it and edits its text on click', async () => {
+      const { input, onChange } = setup([
+        {
+          op: 'or',
+          negated: true,
+          items: [
+            { key: 'environment', op: 'eq', values: ['prod'] },
+            { key: 'path', op: 'neq', values: ['/health'] },
+          ],
+        },
+        {
+          op: 'or',
+          items: [
+            { key: 'team', op: 'eq', values: ['web'] },
+            { key: 'path', op: 'eq', values: ['/x'] },
+          ],
+        },
+      ]);
+      expect(chipTexts()).toEqual(['NOT (environment:prod OR !path:/health)', '(team:web OR path:/x)']);
+      expect(screen.getAllByTestId('chip').map((c) => c.getAttribute('data-invalid'))).toEqual([null, 'true']);
+
+      await act(async () => fireEvent.click(screen.getAllByTestId('chip')[0]));
+      expect(input).toHaveValue('NOT (environment:prod OR !path:/health)');
+      expect(onChange).toHaveBeenLastCalledWith([
+        {
+          op: 'or',
+          items: [
+            { key: 'team', op: 'eq', values: ['web'] },
+            { key: 'path', op: 'eq', values: ['/x'] },
+          ],
+        },
+      ]);
+      await press(input, 'Enter');
+      expect(chipTexts()).toEqual(['(team:web OR path:/x)', 'NOT (environment:prod OR !path:/health)']);
+    });
+
+    describe('at a caret before the end', () => {
+      // Types `value` with the caret right after `before`, as typing in the middle of the text does.
+      const typeAt = (input: HTMLElement, before: string, after: string) =>
+        fireEvent.change(input, {
+          target: { value: before + after, selectionStart: before.length, selectionEnd: before.length },
+        });
+
+      it('suggests for the token at the caret in a group chip being edited and commits the group', async () => {
+        const group: FilterItem = {
+          op: 'or',
+          items: [
+            { key: 'environment', op: 'eq', values: ['prod'] },
+            { key: 'path', op: 'eq', values: ['/orders'] },
+          ],
+        };
+        const { input, onChange } = setup([group]);
+        await act(async () => fireEvent.click(screen.getByTestId('chip')));
+        expect(input).toHaveValue('(environment:prod OR path:/orders)');
+        typeAt(input, '(environment:prod OR path:/orders OR stag', ')');
+        expect(options()).toEqual(['environment:staging']);
+        await press(input, 'Enter');
+        expect(onChange).toHaveBeenLastCalledWith([
+          { op: 'or', items: [...group.items, { key: 'environment', op: 'eq', values: ['staging'] }] },
+        ]);
+      });
+
+      it('suggests inside "()" after the caret moved back', async () => {
+        const { input, onChange } = setup();
+        await focus(input);
+        type(input, '()');
+        (input as HTMLInputElement).setSelectionRange(1, 1);
+        fireEvent.keyUp(input, { key: 'ArrowLeft' });
+        expect(options()).toEqual(['path:/orders', 'environment:prod', 'environment:staging']);
+        typeAt(input, '(stag', ')');
+        expect(options()).toEqual(['environment:staging']);
+        await press(input, 'Enter');
+        expect(onChange).toHaveBeenLastCalledWith([{ key: 'environment', op: 'eq', values: ['staging'] }]);
+      });
+
+      it('suggests values in a closed IN list and then adds the whole text', async () => {
+        const { input, onChange } = setup();
+        await focus(input);
+        typeAt(input, 'environment IN (st', ')');
+        expect(options()).toEqual(['staging', 'Add filter environment IN (st)']);
+        await press(input, 'Enter');
+        fireEvent.keyUp(input, { key: 'Enter' });
+        expect(input).toHaveValue('environment IN (staging)');
+        expect((input as HTMLInputElement).selectionStart).toBe('environment IN (staging'.length);
+        expect(options()).toEqual(['Add filter environment IN (staging)']);
+        await press(input, 'Enter');
+        expect(onChange).toHaveBeenLastCalledWith([{ key: 'environment', op: 'in', values: ['staging'] }]);
+      });
+
+      it('replaces only the token before the caret and keeps the rest', async () => {
+        const { input, onChange } = setup();
+        await focus(input);
+        typeAt(input, 'environment:stag', ' OR path:/orders');
+        expect(options()[0]).toBe('environment:staging');
+        await press(input, 'Enter');
+        expect(onChange).toHaveBeenLastCalledWith([
+          {
+            op: 'or',
+            items: [
+              { key: 'environment', op: 'eq', values: ['staging'] },
+              { key: 'path', op: 'eq', values: ['/orders'] },
+            ],
+          },
+        ]);
+
+        typeAt(input, '(path:/orders OR pro', ' AND (environment:staging OR path:/x)');
+        await press(input, 'Enter');
+        expect(input).toHaveValue('(path:/orders OR environment:prod AND (environment:staging OR path:/x)');
+        expect(options().slice(0, 3)).toEqual([')', 'AND', 'OR']);
+      });
+
+      it('does not commit on a comma inside a closed group', async () => {
+        const { input, onChange } = setup();
+        await focus(input);
+        typeAt(input, '(environment:prod', ')');
+        fireEvent.keyDown(input, { key: ',' });
+        expect(onChange).not.toHaveBeenCalled();
+      });
+    });
+
+    it('inserts a pasted list into typed text instead of splitting it into chips', async () => {
+      const { input, onChange } = setup();
+      await focus(input);
+      type(input, '(environment:prod OR ');
+      const pasted = 'path:/orders, environment:staging';
+      expect(fireEvent.paste(input, { clipboardData: { getData: () => pasted } })).toBe(true);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(input).toHaveValue('(environment:prod OR ');
+    });
+
+    it('narrows suggestions by the top-level terms only', async () => {
+      const { input, tagPairs } = setup([
+        { key: 'environment', op: 'eq', values: ['prod'] },
+        {
+          op: 'or',
+          items: [
+            { key: 'path', op: 'eq', values: ['/a'] },
+            { key: 'path', op: 'eq', values: ['/b'] },
+          ],
+        },
+      ]);
+      await focus(input);
+      expect(tagPairs.mock.calls[0][1]).toEqual([{ key: 'environment', op: 'eq', values: ['prod'] }]);
+    });
   });
 });

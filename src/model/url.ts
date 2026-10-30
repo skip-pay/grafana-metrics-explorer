@@ -6,6 +6,8 @@ import {
   DisplayOptions,
   DisplayType,
   ExplorerState,
+  FilterGroup,
+  FilterItem,
   FilterOp,
   FormulaQuery,
   FunctionCall,
@@ -141,6 +143,7 @@ const SPACE_AGGS = keys<SpaceAgg>({
 });
 const REDUCERS = keys<Reducer>({ avg: 1, sum: 1, min: 1, max: 1, last: 1 });
 const FILTER_OPS = keys<FilterOp>({ eq: 1, neq: 1, in: 1, not_in: 1 });
+const GROUP_OPS = keys<FilterGroup['op']>({ and: 1, or: 1 });
 export const DISPLAY_TYPES = keys<DisplayType>({ lines: 1, bars: 1, areas: 1 });
 const LINE_STYLES = keys<LineStyle>({ solid: 1, dashed: 1, dotted: 1 });
 const STROKES = keys<Stroke>({ thin: 1, normal: 1, thick: 1 });
@@ -228,7 +231,7 @@ function toQueries(raw: unknown): MetricQuery[] {
       letter,
       hidden: bool(o.hidden, false, `${path}.hidden`),
       metric: str(o.metric, '', `${path}.metric`),
-      filters: list(o.filters, `${path}.filters`, toFilter),
+      filters: flatten('and', list(o.filters, `${path}.filters`, toFilterItem)),
       spaceAgg: oneOf(o.spaceAgg, SPACE_AGGS, 'avg', `${path}.spaceAgg`),
       groupBy: list(o.groupBy, `${path}.groupBy`, (v, p) => str(v, undefined, p)),
       functions: toFunctions(o.functions, `${path}.functions`),
@@ -243,8 +246,33 @@ function toQueries(raw: unknown): MetricQuery[] {
   return queries;
 }
 
-function toFilter(raw: unknown, path: string): TagFilter {
+/**
+ * A term, or a group when it has `items`. Groups are shaped as the text form parses them, so their text means the
+ * same: a group of one item is that item, and groups of the parent's operator are flattened into it.
+ */
+function toFilterItem(raw: unknown, path: string): FilterItem {
   const o = obj(raw, path);
+  if (o.items === undefined) {
+    return toFilter(o, path);
+  }
+  const op = oneOf(o.op, GROUP_OPS, 'and', `${path}.op`);
+  const negated = bool(o.negated, false, `${path}.negated`);
+  const items = flatten(op, list(o.items, `${path}.items`, toFilterItem));
+  if (items.length === 0) {
+    throw new Error(`${path}.items: a group takes at least one item`);
+  }
+  if (items.length === 1 && !negated) {
+    return items[0];
+  }
+  return negated ? { op, negated, items } : { op, items };
+}
+
+/** The items with the groups of `op` that are not negated replaced by their items. */
+function flatten(op: FilterGroup['op'], items: FilterItem[]): FilterItem[] {
+  return items.flatMap((item) => ('items' in item && item.op === op && !item.negated ? item.items : [item]));
+}
+
+function toFilter(o: Obj, path: string): TagFilter {
   const key = str(o.key, undefined, `${path}.key`);
   const op = oneOf(o.op, FILTER_OPS, 'eq', `${path}.op`);
   const values = list(o.values, `${path}.values`, (v, p) => str(v, undefined, p));

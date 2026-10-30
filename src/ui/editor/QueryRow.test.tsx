@@ -13,6 +13,8 @@ jest.mock('../../catalog', () => ({
 }));
 
 jest.mock('../../compile', () => ({
+  // The "from" field parses filters for real.
+  ...jest.requireActual('../../compile/filters'),
   FUNCTIONS: [
     { name: 'abs', label: 'Absolute value', category: 'Arithmetic', description: '', params: [], stage: 'post' },
   ],
@@ -24,8 +26,6 @@ jest.mock('../../compile', () => ({
   renderQueryText: (q: { spaceAgg: string; metric: string }) => `${q.spaceAgg}:${q.metric}{*}`,
   parseQueryText: (text: string) =>
     text.startsWith('max:') ? { spaceAgg: 'max', metric: text.slice(4, -3) } : { error: 'Unknown aggregator' },
-  parseFilterText: () => ({ error: 'unused' }),
-  filterToText: () => '',
 }));
 
 const metrics: MetricInfo[] = [

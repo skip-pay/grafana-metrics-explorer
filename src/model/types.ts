@@ -33,9 +33,13 @@ export interface ResolvedMetric extends MetricInfo {
 }
 
 export type FilterOp = 'eq' | 'neq' | 'in' | 'not_in';
-/** One chip of the "from" field. eq/neq carry exactly one value which may contain `*` wildcards;
+/** One term of the "from" field. eq/neq carry exactly one value which may contain `*` wildcards;
  *  `key:*` (has tag) is eq with value '*'. */
 export interface TagFilter { key: string; op: FilterOp; values: string[] }
+/** A parenthesised group of the "from" field: its items joined by AND or OR, the whole negated by NOT. */
+export interface FilterGroup { op: 'and' | 'or'; negated?: boolean; items: FilterItem[] }
+/** One chip of the "from" field; a query's filters are ANDed. */
+export type FilterItem = TagFilter | FilterGroup;
 
 export interface FunctionCall { id: string; name: string; args: Array<number | string> }
 
@@ -45,7 +49,7 @@ export interface MetricQuery {
   letter: string;             // 'a', 'b', ... (assigned on creation, never reused while the row exists)
   hidden: boolean;            // letter badge toggle; hidden queries still feed formulas
   metric: string;             // logical metric name, '' until chosen
-  filters: TagFilter[];
+  filters: FilterItem[];
   spaceAgg: SpaceAgg;
   groupBy: string[];
   functions: FunctionCall[];  // modifiers (rollup, as_count, as_rate, fill, timeshift…) and functions, in UI order

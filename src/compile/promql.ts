@@ -13,8 +13,8 @@ export type RollupAgg = 'avg' | 'sum' | 'min' | 'max' | 'count' | 'last';
 export interface TemplateInput {
   name: string;
   info: MetricInfo | ResolvedMetric | undefined;
-  /** Matchers of the user's filters. */
-  matchers: string[];
+  /** Matchers of the user's filters, one list per OR branch. */
+  branches: string[][];
   spaceAgg: SpaceAgg;
   groupBy: string[];
   countMode: 'as_count' | 'as_rate';
@@ -70,11 +70,19 @@ class Builder {
   constructor(readonly input: TemplateInput) {}
 
   /** A range selector; the timeshift offset goes into every selector of the query. */
-  sel(stream: string, extra: string[] = [], windowSec = this.input.stepSec): string {
-    const matchers = [...extra, ...this.input.matchers];
+  sel(stream: string, extra: string[], windowSec: number, filter: string[]): string {
+    const matchers = [...extra, ...filter];
     const braces = matchers.length > 0 ? `{${matchers.join(',')}}` : '';
     const offset = this.input.offsetSec !== 0 ? ` offset ${this.input.offsetSec}s` : '';
     return `${stream}${braces}[${windowSec}s]${offset}${this.input.atEnd ? ' @ end()' : ''}`;
+  }
+
+  /**
+   * `fn` over a range selector of `stream`; with several filter branches, the union of one per branch. `or` keeps
+   * a series selected by two branches once.
+   */
+  read(fn: string, stream: string, extra: string[] = [], windowSec = this.input.stepSec): string {
+    return this.input.branches.map((filter) => `${fn}(${this.sel(stream, extra, windowSec, filter)})`).join(' or ');
   }
 
   agg(op: string, inner: string, extraKeys: string[] = []): string {
@@ -102,16 +110,16 @@ class Builder {
 function gauge(input: TemplateInput): TemplateResult {
   const b = new Builder(input);
   if (input.spaceAgg === 'count') {
-    return b.done(b.agg('count', `last_over_time(${b.sel(b.stream('base'))})`));
+    return b.done(b.agg('count', b.read('last_over_time', b.stream('base'))));
   }
-  return b.done(b.agg(input.spaceAgg, `${input.rollupAgg ?? 'avg'}_over_time(${b.sel(b.stream('base'))})`));
+  return b.done(b.agg(input.spaceAgg, b.read(`${input.rollupAgg ?? 'avg'}_over_time`, b.stream('base'))));
 }
 
 function deltaCounter(input: TemplateInput): TemplateResult {
   const b = new Builder(input);
   const { info } = input;
   const temporality = !isResolved(info) || info.temporality.delta ? [DELTA_MATCHER] : [];
-  const inner = `${input.rollupAgg ?? 'sum'}_over_time(${b.sel(b.stream('base'), temporality)})`;
+  const inner = b.read(`${input.rollupAgg ?? 'sum'}_over_time`, b.stream('base'), temporality);
   const pointLabels = POINT_IDENTITY.filter((key) => !input.groupBy.includes(key));
   const expr =
     input.spaceAgg === 'sum'
@@ -133,7 +141,7 @@ function cumulativeCounter(input: TemplateInput): TemplateResult {
   const { info } = input;
   b.intervalOnlyRollup('cumulative counters');
   const temporality = isResolved(info) && info.temporality.cumulative ? [CUMULATIVE_MATCHER] : [];
-  const expr = b.agg(input.spaceAgg, `rate(${b.sel(b.stream('base'), temporality, rateWindowSec(input))})`);
+  const expr = b.agg(input.spaceAgg, b.read('rate', b.stream('base'), temporality, rateWindowSec(input)));
   return b.done(input.countMode === 'as_rate' || input.spaceAgg === 'count' ? expr : `${expr} * ${input.stepSec}`);
 }
 
@@ -150,7 +158,7 @@ function distribution(input: TemplateInput): TemplateResult {
 
   if (cumulative) {
     const temporality = info.temporality.cumulative ? [CUMULATIVE_MATCHER] : [];
-    const rate = (stream: string) => `rate(${b.sel(stream, temporality, rateWindowSec(input))})`;
+    const rate = (stream: string) => b.read('rate', stream, temporality, rateWindowSec(input));
     if (quantile) {
       return b.done(`histogram_quantile(${quantile}, ${b.agg('sum', rate(b.stream('bucket')), ['le'])})`);
     }
@@ -168,7 +176,7 @@ function distribution(input: TemplateInput): TemplateResult {
   }
 
   const temporality = !isResolved(info) || info.temporality.delta ? [DELTA_MATCHER] : [];
-  const sum = (stream: string) => `sum_over_time(${b.sel(stream, temporality)})`;
+  const sum = (stream: string) => b.read('sum_over_time', stream, temporality);
   const bucketQuantile = (q: string) => `histogram_quantile(${q}, ${b.agg('sum', sum(b.stream('bucket')), ['le'])})`;
   if (quantile) {
     return b.done(bucketQuantile(quantile));
@@ -184,12 +192,12 @@ function distribution(input: TemplateInput): TemplateResult {
     case 'min': {
       const min = info?.streams.min;
       return min
-        ? b.done(b.agg('min', `min_over_time(${b.sel(min, temporality)})`))
+        ? b.done(b.agg('min', b.read('min_over_time', min, temporality)))
         : { skip: 'min is not available: the histogram has no _min stream' };
     }
     case 'max': {
       const max = info?.streams.max;
-      return b.done(max ? b.agg('max', `max_over_time(${b.sel(max, temporality)})`) : bucketQuantile('1'));
+      return b.done(max ? b.agg('max', b.read('max_over_time', max, temporality)) : bucketQuantile('1'));
     }
   }
   return { skip: `${spaceAgg} is not available for distributions` };
@@ -198,16 +206,16 @@ function distribution(input: TemplateInput): TemplateResult {
 function cloudwatch(input: TemplateInput): TemplateResult {
   const b = new Builder(input);
   b.intervalOnlyRollup('CloudWatch metrics');
-  const sum = `sum_over_time(${b.sel(b.stream('sum'))})`;
-  const count = `sum_over_time(${b.sel(b.stream('count'))})`;
+  const sum = b.read('sum_over_time', b.stream('sum'));
+  const count = b.read('sum_over_time', b.stream('count'));
   switch (input.spaceAgg) {
     case 'avg':
       // The average of each source's own average, as CloudWatch shows it.
-      return b.done(b.agg('avg', `${sum} / ${count}`));
+      return b.done(b.agg('avg', `${operand(sum)} / ${operand(count)}`));
     case 'max':
-      return b.done(b.agg('max', `max_over_time(${b.sel(b.stream('base'), ['quantile="1"'])})`));
+      return b.done(b.agg('max', b.read('max_over_time', b.stream('base'), ['quantile="1"'])));
     case 'min':
-      return b.done(b.agg('min', `min_over_time(${b.sel(b.stream('base'), ['quantile="0"'])})`));
+      return b.done(b.agg('min', b.read('min_over_time', b.stream('base'), ['quantile="0"'])));
     case 'sum':
       return b.done(b.agg('sum', sum));
     case 'count':

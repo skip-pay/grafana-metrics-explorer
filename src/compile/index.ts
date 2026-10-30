@@ -19,13 +19,15 @@ export {
   timeshiftOffsetSec,
 } from './functions';
 export {
+  filterTerms,
   filterToText,
   filtersToMatchers,
+  isFilterGroup,
   isValidLabelKey,
-  parseFilterText,
   parseScopeText,
+  quoteValue,
   renderScope,
-  splitTopLevel,
+  topLevelFilters,
 } from './filters';
 export { chooseStep, STEP_LADDER } from './step';
 export { capGroups, GROUP_LIMIT, isResolved } from './promql';

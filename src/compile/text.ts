@@ -100,7 +100,7 @@ class Parser {
         return this.s.slice(start, this.i++);
       }
     }
-    return this.fail(`Missing "${close}"`);
+    return this.fail(depth > 0 ? 'Missing ")"' : `Missing "${close}"`);
   }
 
   arg(): number | string {

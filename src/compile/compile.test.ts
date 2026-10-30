@@ -1,5 +1,14 @@
 import { defaultState } from '../model/defaults';
-import { ExplorerState, FunctionCall, MetricInfo, MetricQuery, ResolvedMetric, TagFilter } from '../model/types';
+import {
+  ExplorerState,
+  FilterGroup,
+  FilterItem,
+  FunctionCall,
+  MetricInfo,
+  MetricQuery,
+  ResolvedMetric,
+  TagFilter,
+} from '../model/types';
 import { compile } from './compile';
 import { CompileContext, CompiledQuery } from './types';
 
@@ -62,6 +71,8 @@ const METRICS: Record<string, ResolvedMetric | MetricInfo> = {
 
 const fn = (name: string, ...args: Array<number | string>): FunctionCall => ({ id: name, name, args });
 const eq = (key: string, value: string): TagFilter => ({ key, op: 'eq', values: [value] });
+const or = (...items: FilterItem[]): FilterGroup => ({ op: 'or', items });
+const and = (...items: FilterItem[]): FilterGroup => ({ op: 'and', items });
 
 function q(metric: string, spaceAgg: MetricQuery['spaceAgg'], extra: Partial<MetricQuery> = {}): Partial<MetricQuery> {
   return { metric, spaceAgg, ...extra };
@@ -287,6 +298,142 @@ describe('golden PromQL (2 h range, 60 s step)', () => {
         'avg(avg_over_time(gauge[60s] offset -600s))'
       );
     });
+  });
+});
+
+describe('golden PromQL with OR filters (2 h range, 60 s step)', () => {
+  // Two branches that do not merge: each read of the metric becomes a union of one read per branch.
+  const filters = [or(eq('service', 'api'), eq('path', '/x'))];
+  const union = (fn: string, sel: (filter: string) => string) =>
+    `${fn}(${sel('service="api"')}) or ${fn}(${sel('path="/x"')})`;
+  const withOr = (metric: string, spaceAgg: MetricQuery['spaceAgg'], extra: Partial<MetricQuery> = {}) =>
+    q(metric, spaceAgg, { filters, ...extra });
+
+  it.each<[string, Partial<MetricQuery>, string]>([
+    ['gauge', withOr('gauge', 'avg'), `avg(${union('avg_over_time', (f) => `gauge{${f}}[60s]`)})`],
+    [
+      'gauge, grouped count',
+      withOr('gauge', 'count', { groupBy: ['cluster'] }),
+      `count by (cluster) (${union('last_over_time', (f) => `gauge{${f}}[60s]`)})`,
+    ],
+    [
+      'delta counter',
+      withOr('requests', 'sum', { groupBy: ['environment'], functions: [fn('as_rate')] }),
+      `sum by (environment) (${union('sum_over_time', (f) => `requests{${DELTA},${f}}[60s]`)}) / 60`,
+    ],
+    [
+      'delta counter, avg',
+      withOr('requests', 'avg'),
+      `avg(sum without (instance_id, start_time, exemplars, flag) (${union('sum_over_time', (f) => `requests{${DELTA},${f}}[60s]`)}))`,
+    ],
+    [
+      'cumulative counter',
+      withOr('events', 'sum', { groupBy: ['environment'] }),
+      `sum by (environment) (${union('rate', (f) => `events{${CUMULATIVE},${f}}[240s]`)}) * 60`,
+    ],
+    [
+      'delta distribution, p95',
+      withOr('dur', 'p95'),
+      `histogram_quantile(0.95, sum by (le) (${union('sum_over_time', (f) => `dur_bucket{${DELTA},${f}}[60s]`)}))`,
+    ],
+    [
+      'delta distribution, avg',
+      withOr('dur', 'avg'),
+      `sum(${union('sum_over_time', (f) => `dur_sum{${DELTA},${f}}[60s]`)}) / (sum(${union('sum_over_time', (f) => `dur_count{${DELTA},${f}}[60s]`)}) > 0)`,
+    ],
+    [
+      'delta distribution, count',
+      withOr('dur', 'count'),
+      `sum(${union('sum_over_time', (f) => `dur_count{${DELTA},${f}}[60s]`)})`,
+    ],
+    [
+      'delta distribution, min',
+      withOr('dur', 'min'),
+      `min(${union('min_over_time', (f) => `dur_min{${DELTA},${f}}[60s]`)})`,
+    ],
+    [
+      'delta distribution, max',
+      withOr('dur', 'max'),
+      `max(${union('max_over_time', (f) => `dur_max{${DELTA},${f}}[60s]`)})`,
+    ],
+    [
+      'cumulative distribution, p95',
+      withOr('cdur', 'p95'),
+      `histogram_quantile(0.95, sum by (le) (${union('rate', (f) => `cdur_bucket{${CUMULATIVE},${f}}[240s]`)}))`,
+    ],
+    [
+      'cumulative distribution, avg',
+      withOr('cdur', 'avg'),
+      `sum(${union('rate', (f) => `cdur_sum{${CUMULATIVE},${f}}[240s]`)}) / (sum(${union('rate', (f) => `cdur_count{${CUMULATIVE},${f}}[240s]`)}) > 0)`,
+    ],
+    [
+      'cumulative distribution, sum',
+      withOr('cdur', 'sum'),
+      `sum(${union('rate', (f) => `cdur_sum{${CUMULATIVE},${f}}[240s]`)}) * 60`,
+    ],
+  ])('%s', (_kind, query, promql) => {
+    expect(expr(query)).toBe(promql);
+  });
+
+  describe('cloudwatch', () => {
+    const cw = [or(eq('dimensions_clustername', 'a'), eq('dimensions_servicename', 'b'))];
+    const cwUnion = (fn: string, sel: (filter: string) => string) =>
+      `${fn}(${sel('dimensions_clustername="a"')}) or ${fn}(${sel('dimensions_servicename="b"')})`;
+
+    it.each<[Partial<MetricQuery>, string]>([
+      [
+        q('cpu', 'avg', { filters: cw }),
+        `avg((${cwUnion('sum_over_time', (f) => `cpu_sum{${f}}[60s]`)}) / (${cwUnion('sum_over_time', (f) => `cpu_count{${f}}[60s]`)}))`,
+      ],
+      [q('cpu', 'max', { filters: cw }), `max(${cwUnion('max_over_time', (f) => `cpu{quantile="1",${f}}[60s]`)})`],
+      [q('cpu', 'min', { filters: cw }), `min(${cwUnion('min_over_time', (f) => `cpu{quantile="0",${f}}[60s]`)})`],
+      [q('cpu', 'sum', { filters: cw }), `sum(${cwUnion('sum_over_time', (f) => `cpu_sum{${f}}[60s]`)})`],
+      [q('cpu', 'count', { filters: cw }), `sum(${cwUnion('sum_over_time', (f) => `cpu_count{${f}}[60s]`)})`],
+    ])('%j', (query, promql) => {
+      expect(expr(query)).toBe(promql);
+    });
+  });
+
+  it('merges an OR over one key into one selector', () => {
+    expect(
+      expr(
+        q('gauge', 'avg', {
+          filters: [eq('environment', 'prod'), or(eq('service', 'api'), eq('service', 'worker'))],
+        })
+      )
+    ).toBe('avg(avg_over_time(gauge{environment="prod",service=~"(?:api|worker)"}[60s]))');
+  });
+
+  it('pushes NOT down to the selector', () => {
+    const filters = [{ op: 'or' as const, negated: true, items: [eq('result', 'ok'), eq('result', 'skipped')] }];
+    expect(expr(q('gauge', 'avg', { filters }))).toBe('avg(avg_over_time(gauge{result!="ok",result!="skipped"}[60s]))');
+  });
+
+  it('caps a grouped OR query with the branches in the ranking too', () => {
+    const c = one(withOr('requests', 'sum', { groupBy: ['environment'], functions: [fn('hour_before')] }));
+    const query = `sum by (environment) (${union('sum_over_time', (f) => `requests{${DELTA},${f}}[60s] offset 3600s`)})`;
+    const ranked = `sum by (environment) (${union('sum_over_time', (f) => `requests{${DELTA},${f}}[7200s] offset 3600s @ end()`)})`;
+    expect(c.expr).toBe(query);
+    expect(c.cappedExpr).toBe(`(${query}) and topk(200, ${ranked})`);
+  });
+
+  it('skips a filter with too many branches, an unknown key in a group or a negated key:*', () => {
+    // Branches on two different keys each never merge: 21 of them.
+    const keys = ['environment', 'path', 'cluster', 'service', 'provider', 'event_category', 'result'];
+    const branches = keys.flatMap((a, i) => keys.slice(i + 1).map((b) => and(eq(a, 'x'), eq(b, 'y'))));
+    const skips = compile(
+      stateWith(
+        q('requests', 'sum', { filters: [or(...branches)] }),
+        q('requests', 'sum', { filters: [or(eq('service', 'api'), eq('nonexistent', 'x'))] }),
+        q('requests', 'sum', { filters: [{ op: 'or', negated: true, items: [eq('path', '*'), eq('service', 'x')] }] })
+      ),
+      ctx()
+    ).queries.map((c) => c.skip);
+    expect(skips).toEqual([
+      'The filter expands to more than 16 OR branches; simplify it or list the values of a tag with IN (…)',
+      'Tag `nonexistent` does not exist on `requests`',
+      'Filtering on a missing tag (!key:*) is not supported',
+    ]);
   });
 });
 

@@ -42,6 +42,35 @@ describe('stateFromLink', () => {
     expect(state).toMatchObject({ viz: 'timeseries', formulas: [], split: { key: null } });
   });
 
+  it('reads boolean filters with AND, OR, NOT and parentheses', () => {
+    const { state, warning } = stateFromLink(
+      { q: ['sum:http_requests_total{env:prod AND (service:api OR service:worker), NOT (method:GET OR method:HEAD)}'] },
+      metrics
+    );
+    expect(warning).toBeUndefined();
+    expect(state.queries[0].filters).toEqual([
+      { key: 'env', op: 'eq', values: ['prod'] },
+      {
+        op: 'or',
+        items: [
+          { key: 'service', op: 'eq', values: ['api'] },
+          { key: 'service', op: 'eq', values: ['worker'] },
+        ],
+      },
+      {
+        op: 'or',
+        negated: true,
+        items: [
+          { key: 'method', op: 'eq', values: ['GET'] },
+          { key: 'method', op: 'eq', values: ['HEAD'] },
+        ],
+      },
+    ]);
+    expect(renderQueryText(state.queries[0])).toBe(
+      'sum:http_requests_total{env:prod,(service:api OR service:worker),NOT (method:GET OR method:HEAD)}'
+    );
+  });
+
   it('resolves dotted names against the catalogue and takes the default aggregator of the kind', () => {
     const { state } = stateFromLink({ q: ['node.load1{*}', 'http.requests.total{*}'] }, metrics);
     expect(state.queries.map((q) => [q.metric, q.spaceAgg])).toEqual([
@@ -117,7 +146,12 @@ describe('stateFromLink', () => {
 
 describe('readable links in the URL', () => {
   it('round-trips encoded values with braces, commas, quotes and spaces', () => {
-    const q = [REQUESTS, TOP, 'max:http_requests_total{path:"/a, b"} by {service,job}.rollup(max, 60)'];
+    const q = [
+      REQUESTS,
+      TOP,
+      'max:http_requests_total{path:"/a, b"} by {service,job}.rollup(max, 60)',
+      'sum:http_requests_total{env:prod,(service:api OR service:worker),NOT (method:GET OR path:"/a OR b")}',
+    ];
     const f = ['(a + b) / 2', "top(a, 10, 'max', 'asc')"];
     const encoded = [...q.map((v) => `q=${encodeURIComponent(v)}`), ...f.map((v) => `f=${encodeURIComponent(v)}`)];
     const link = parseSearch(`${encoded.join('&')}&viz=timeseries&from=now-6h`);

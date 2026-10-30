@@ -1,7 +1,8 @@
 import { locationService } from '@grafana/runtime';
 
+import { filterBranches, parseScopeText, renderScope } from '../compile/filters';
 import { defaultState } from './defaults';
-import { ExplorerState } from './types';
+import { ExplorerState, FilterItem } from './types';
 import {
   decodeState,
   encodeState,
@@ -32,6 +33,20 @@ const sample = (): ExplorerState => ({
       filters: [
         { key: 'env', op: 'eq', values: ['prod'] },
         { key: 'path', op: 'not_in', values: ['/health', '/ready'] },
+        {
+          op: 'or',
+          items: [
+            { key: 'service', op: 'eq', values: ['api'] },
+            {
+              op: 'and',
+              negated: true,
+              items: [
+                { key: 'service', op: 'eq', values: ['worker'] },
+                { key: 'queue', op: 'in', values: ['a', 'b'] },
+              ],
+            },
+          ],
+        },
       ],
       spaceAgg: 'sum',
       groupBy: ['path'],
@@ -115,6 +130,84 @@ describe('encodeState / decodeState', () => {
     expect(decodeState('{"v":1,"display":{"palette":"vivid"}}').ok).toBe(true);
   });
 
+  it('loads a state written by 0.1.0', () => {
+    const text =
+      '{"v":1,"viz":"timeseries","queries":[{"kind":"query","id":"k1","letter":"a","hidden":false,' +
+      '"metric":"http_requests_total","filters":[{"key":"env","op":"eq","values":["prod"]},' +
+      '{"key":"status","op":"neq","values":["5*"]},{"key":"method","op":"in","values":["GET","HEAD"]},' +
+      '{"key":"path","values":["/x"]}],"spaceAgg":"sum","groupBy":["service"],' +
+      '"functions":[{"id":"f1","name":"as_count","args":[]}]}],"formulas":[]}';
+    const result = decodeState(text);
+    expect(result.ok && result.state.queries[0].filters).toEqual([
+      { key: 'env', op: 'eq', values: ['prod'] },
+      { key: 'status', op: 'neq', values: ['5*'] },
+      { key: 'method', op: 'in', values: ['GET', 'HEAD'] },
+      { key: 'path', op: 'eq', values: ['/x'] },
+    ]);
+  });
+
+  it('reads a filter group, defaulting to AND and dropping a false negation', () => {
+    const result = decodeState(
+      '{"v":1,"queries":[{"filters":[{"op":"or","negated":false,"items":[' +
+        '{"items":[{"key":"a","values":["1"]},{"key":"b","values":["2"]}]},{"key":"c","values":["3"]}]}]}]}'
+    );
+    expect(result.ok && result.state.queries[0].filters).toEqual([
+      {
+        op: 'or',
+        items: [
+          {
+            op: 'and',
+            items: [
+              { key: 'a', op: 'eq', values: ['1'] },
+              { key: 'b', op: 'eq', values: ['2'] },
+            ],
+          },
+          { key: 'c', op: 'eq', values: ['3'] },
+        ],
+      },
+    ]);
+  });
+
+  it('shapes groups as the text form parses them, so the text means the same', () => {
+    const env = (value: string) => ({ key: 'env', values: [value] });
+    const decode = (filters: unknown[]) => {
+      const result = decodeState(JSON.stringify({ v: 1, queries: [{ filters }] }));
+      return result.ok ? result.state.queries[0].filters : result.error;
+    };
+    const cases: unknown[][] = [
+      [env('prod'), { op: 'and', items: [env('dev'), { key: 'x', values: ['1'] }] }],
+      [{ op: 'or', items: [env('a')] }, env('b')],
+      [{ op: 'or', items: [env('a'), { op: 'or', items: [env('b'), { op: 'and', items: [env('c')] }] }] }],
+      [{ op: 'or', negated: true, items: [env('a')] }],
+    ];
+    for (const filters of cases) {
+      const decoded = decode(filters);
+      expect(Array.isArray(decoded)).toBe(true);
+      const reparsed = parseScopeText(renderScope(decoded as FilterItem[]));
+      expect(filterBranches(reparsed as FilterItem[])).toEqual(filterBranches(decoded as FilterItem[]));
+    }
+    expect(decode(cases[0])).toEqual([
+      { key: 'env', op: 'eq', values: ['prod'] },
+      { key: 'env', op: 'eq', values: ['dev'] },
+      { key: 'x', op: 'eq', values: ['1'] },
+    ]);
+    expect(decode(cases[1])).toEqual([
+      { key: 'env', op: 'eq', values: ['a'] },
+      { key: 'env', op: 'eq', values: ['b'] },
+    ]);
+    expect(decode(cases[2])).toEqual([
+      {
+        op: 'or',
+        items: [
+          { key: 'env', op: 'eq', values: ['a'] },
+          { key: 'env', op: 'eq', values: ['b'] },
+          { key: 'env', op: 'eq', values: ['c'] },
+        ],
+      },
+    ]);
+    expect(decode(cases[3])).toEqual([{ op: 'or', negated: true, items: [{ key: 'env', op: 'eq', values: ['a'] }] }]);
+  });
+
   it('fills a partial split with defaults', () => {
     const result = decodeState('{"v":1,"split":{"key":"env","limit":12}}');
     expect(result.ok && result.state.split).toEqual({ key: 'env', limit: 12, order: 'top', sortBy: 'avg' });
@@ -167,6 +260,24 @@ describe('encodeState / decodeState', () => {
     ['{"v":1,"queries":[{"filters":[{"key":"k","op":"eq","values":["a","b"]}]}]}', 'eq/neq take exactly one value'],
     ['{"v":1,"queries":[{"filters":[{"key":"k","op":"in","values":[]}]}]}', 'in/not_in take at least one value'],
     ['{"v":1,"queries":[{"filters":[{"key":"k","op":"like","values":["a"]}]}]}', 'queries[0].filters[0].op'],
+    [
+      '{"v":1,"queries":[{"filters":[{"op":"xor","items":[]}]}]}',
+      'queries[0].filters[0].op: "xor" is not one of and, or',
+    ],
+    ['{"v":1,"queries":[{"filters":[{"op":"or","items":[]}]}]}', 'filters[0].items: a group takes at least one item'],
+    ['{"v":1,"queries":[{"filters":[{"op":"or","items":{}}]}]}', 'filters[0].items: expected an array'],
+    [
+      '{"v":1,"queries":[{"filters":[{"op":"or","negated":1,"items":[]}]}]}',
+      'filters[0].negated: expected true or false',
+    ],
+    [
+      '{"v":1,"queries":[{"filters":[{"op":"or","items":[{"key":"a","values":["1"]},{"key":"b","values":[]}]}]}]}',
+      'queries[0].filters[0].items[1]: eq/neq take exactly one value',
+    ],
+    [
+      '{"v":1,"queries":[{"filters":[{"op":"or","items":[{"op":"and","items":[3]}]}]}]}',
+      'items[0].items[0]: expected an object',
+    ],
     ['{"v":1,"queries":[{"functions":[{"name":"top","args":[null]}]}]}', 'functions[0].args[0]'],
     ['{"v":1,"formulas":[{"expression":1}]}', 'formulas[0].expression: expected a string'],
     ['{"v":1,"display":{"palette":"pink"}}', 'display.palette'],

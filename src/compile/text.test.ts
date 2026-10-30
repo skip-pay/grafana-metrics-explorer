@@ -1,4 +1,4 @@
-import { FunctionCall, MetricInfo, MetricQuery, SpaceAgg, TagFilter } from '../model/types';
+import { FilterGroup, FilterItem, FunctionCall, MetricInfo, MetricQuery, SpaceAgg, TagFilter } from '../model/types';
 import { parseQueryText, renderQueryText } from './text';
 
 const fn = (name: string, ...args: Array<number | string>): FunctionCall => ({ id: 'id', name, args });
@@ -6,11 +6,14 @@ const eq = (key: string, value: string): TagFilter => ({ key, op: 'eq', values: 
 const neq = (key: string, value: string): TagFilter => ({ key, op: 'neq', values: [value] });
 const isIn = (key: string, ...values: string[]): TagFilter => ({ key, op: 'in', values });
 const notIn = (key: string, ...values: string[]): TagFilter => ({ key, op: 'not_in', values });
+const or = (...items: FilterItem[]): FilterGroup => ({ op: 'or', items });
+const and = (...items: FilterItem[]): FilterGroup => ({ op: 'and', items });
+const not = (group: FilterGroup): FilterGroup => ({ op: group.op, negated: true, items: group.items });
 
 function query(
   metric: string,
   spaceAgg: SpaceAgg,
-  filters: TagFilter[] = [],
+  filters: FilterItem[] = [],
   groupBy: string[] = [],
   functions: FunctionCall[] = []
 ): MetricQuery {
@@ -60,6 +63,14 @@ describe('renderQueryText', () => {
       'round(abs(sum:http_server_requests_total{*} by {a,b}.as_rate()), 2)',
     ],
     [query('', 'avg'), 'avg:{*}'],
+    [
+      query(m, 'sum', [eq('env', 'prod'), or(eq('service', 'api'), eq('service', 'worker')), neq('status', '5*')]),
+      'sum:http_server_requests_total{env:prod,(service:api OR service:worker),!status:5*}',
+    ],
+    [
+      query(m, 'sum', [eq('env', 'prod'), not(or(eq('method', 'GET'), eq('method', 'HEAD')))], ['path']),
+      'sum:http_server_requests_total{env:prod,NOT (method:GET OR method:HEAD)} by {path}',
+    ],
   ])('%#: %s', (q, text) => {
     expect(renderQueryText(q)).toBe(text);
   });
@@ -111,6 +122,13 @@ describe('parse(render(q)) round trip', () => {
     query(g, 'avg', [], [], [fn('log2'), fn('log10'), fn('ceil'), fn('floor'), fn('per_minute'), fn('per_hour')]),
     query('', 'avg'),
     query('some_metric_not_in_catalog', 'min', [], [], [fn('per_hour')]),
+    query(m, 'sum', [eq('env', 'prod'), or(eq('service', 'api'), eq('service', 'worker')), neq('status', '5*')]),
+    query(m, 'sum', [not(or(eq('method', 'GET'), isIn('method', 'HEAD', 'OPTIONS')))], ['path'], [fn('as_rate')]),
+    query(m, 'sum', [or(and(eq('a', '1'), neq('b', '2')), not(and(eq('c', '3'), notIn('d', 'x,y'))), eq('e', '*'))]),
+    query(m, 'sum', [
+      or(eq('msg', 'x OR y'), eq('msg', '(a)')),
+      not(and(eq('x', '1'), or(eq('y', '2'), eq('z', '3')))),
+    ]),
   ];
 
   it('has at least 30 cases', () => {
@@ -165,6 +183,17 @@ describe('parseQueryText', () => {
     });
   });
 
+  it('reads boolean scopes with AND, OR, NOT and parentheses', () => {
+    expect(parse('sum:m{env:prod AND (service:api OR service:worker), !status:5*} by {path}')).toMatchObject({
+      filters: [eq('env', 'prod'), or(eq('service', 'api'), eq('service', 'worker')), neq('status', '5*')],
+      groupBy: ['path'],
+    });
+    expect(parse('sum:m{env:prod, NOT (method:GET OR method:HEAD)}').filters).toEqual([
+      eq('env', 'prod'),
+      not(or(eq('method', 'GET'), eq('method', 'HEAD'))),
+    ]);
+  });
+
   it.each([
     ['', 'Empty query'],
     ['foo:m{*}', 'Unknown aggregator "foo"'],
@@ -179,7 +208,8 @@ describe('parseQueryText', () => {
     ['avg:m{*}.rollup(last)', 'rollup(): agg must be one of avg, count, max, min, sum'],
     ['top(avg:m{*}, 7)', 'top(): n must be one of'],
     ['abs(avg:m{*}, 1)', 'abs() takes 0 arguments'],
-    ['avg:m{env:prod OR env:staging}', 'Boolean scopes'],
+    ['avg:m{env:prod OR}', 'Expected a filter after "OR"'],
+    ['avg:m{(env:prod OR env:staging}', 'Missing ")"'],
     ['avg:m{$env}', 'Template variables are not supported'],
     ['avg:m{*} by {bad-key}', 'Invalid tag key "bad-key"'],
     ['avg:m{*} extra', 'Unexpected text after the query'],

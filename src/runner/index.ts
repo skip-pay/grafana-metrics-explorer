@@ -5,7 +5,7 @@ import type { DataQuery } from '@grafana/schema';
 import { useTheme2 } from '@grafana/ui';
 
 import { getCatalog, TimeWindow } from '../catalog';
-import { compile, CompiledPlan, GROUP_LIMIT } from '../compile';
+import { compile, CompiledPlan, GROUP_LIMIT, topLevelFilters } from '../compile';
 import { buildCharts, ChartModel, evaluate, EvaluateResult } from '../engine';
 import { ExplorerState, MetricInfo, ResolvedMetric, TagFilter } from '../model/types';
 import { RUN_TIMEOUT_MS, RunOutcome, SequentialRunner } from './sequential';
@@ -363,8 +363,8 @@ interface EstimateRequest {
 
 /**
  * Estimated group counts of the grouped queries by letter: the product of the value counts of their group keys
- * under their filters (catalogue calls, cached there). `ready` once every estimate is known or has failed; a
- * failed one leaves the query uncapped.
+ * under their top-level filter terms (catalogue calls, cached there), an upper bound when the filter has groups.
+ * `ready` once every estimate is known or has failed; a failed one leaves the query uncapped.
  */
 function useGroupEstimates(
   datasourceUid: string,
@@ -388,8 +388,9 @@ function useGroupEstimates(
       if (cq.skip || cq.cappedExpr === undefined || !query || !metric) {
         continue;
       }
-      const id = JSON.stringify([datasourceUid, metric.name, cq.groupBy, query.filters, snapped]);
-      list.push({ id, letter: cq.letter, metric, keys: cq.groupBy, filters: query.filters });
+      const filters = topLevelFilters(query.filters);
+      const id = JSON.stringify([datasourceUid, metric.name, cq.groupBy, filters, snapped]);
+      list.push({ id, letter: cq.letter, metric, keys: cq.groupBy, filters });
     }
     return list;
   }, [datasourceUid, plan, state.queries, resolved, window]);

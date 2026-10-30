@@ -22,7 +22,8 @@ backend with a time-range cap and series limits.
 
 - **Query rows** `a | Metrics | <metric> | from (everywhere) | avg by (everything) | Σ Modify`, with ranked metric
   autocomplete, a preview of unit, type, description and tag keys, and tag suggestions for filters and grouping.
-- **Tag filters** with negation, wildcards and `IN` / `NOT IN` lists; grouping by any tag keys.
+- **Tag filters** with negation, wildcards, `IN` / `NOT IN` lists and boolean expressions with `AND`, `OR`, `NOT` and
+  parentheses; grouping by any tag keys.
 - **Functions** (Σ Modify): arithmetic, boolean remapping, interpolation, timeshift, rate, smoothing, rollup, rank,
   count, regression and exclusion, shown as editable pills under the row.
 - **Raw text mode** (`</>`) per row, e.g. `sum:http_requests_total{env:prod} by {service}.as_count()`.
@@ -71,7 +72,7 @@ The plugin is not signed, so Grafana loads it only when its id is listed in `all
 ```ini
 [plugins]
 allow_loading_unsigned_plugins = skippay-metricsexplorer-panel
-preinstall = skippay-metricsexplorer-panel@0.1.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.1.0/skippay-metricsexplorer-panel-0.1.0.zip
+preinstall = skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip
 ```
 
 The same as environment variables: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS` and `GF_PLUGINS_PREINSTALL`. Both
@@ -95,7 +96,7 @@ deprecated `GF_INSTALL_PLUGINS`):
 grafana.ini:
   plugins:
     allow_loading_unsigned_plugins: skippay-metricsexplorer-panel
-    preinstall: skippay-metricsexplorer-panel@0.1.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.1.0/skippay-metricsexplorer-panel-0.1.0.zip
+    preinstall: skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip
 ```
 
 ### Docker
@@ -103,18 +104,18 @@ grafana.ini:
 ```bash
 docker run -d -p 127.0.0.1:3000:3000 \
   -e GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=skippay-metricsexplorer-panel \
-  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.1.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.1.0/skippay-metricsexplorer-panel-0.1.0.zip \
+  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.2.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip \
   grafana/grafana:13.1.1
 ```
 
 ### Grafana CLI or by hand
 
 ```bash
-grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.1.0/skippay-metricsexplorer-panel-0.1.0.zip \
+grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.0/skippay-metricsexplorer-panel-0.2.0.zip \
   plugins install skippay-metricsexplorer-panel
 ```
 
-Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.1.0.zip.sha256`, unzip it into
+Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.2.0.zip.sha256`, unzip it into
 Grafana's plugin directory (`/var/lib/grafana/plugins` by default) and restart Grafana.
 
 ## Creating the dashboard
@@ -142,16 +143,27 @@ within the panel's maximum range.
 
   ![Metric autocomplete](docs/screenshots/autocomplete.png)
 
-- **from**: tag filters, separated by commas. Filters on the same key are ORed, different keys are ANDed.
+- **from**: tag filters, one chip each, ANDed. Filters on the same key in one AND list match either value
+  (`env:prod, env:dev` selects both environments); exclusions of one key all apply.
 
-  | Filter              | Matches                                       |
-  | ------------------- | --------------------------------------------- |
-  | `env:prod`          | the tag equals the value                      |
-  | `!env:prod`         | the tag differs or, on Prometheus, is missing |
-  | `service:api-*`     | wildcard; `*` matches any characters          |
-  | `service:*`         | the tag is present                            |
-  | `env IN (prod,dev)` | any of the values                             |
-  | `env NOT IN (dev)`  | none of the values                            |
+  | Filter                                         | Matches                                       |
+  | ---------------------------------------------- | --------------------------------------------- |
+  | `env:prod`                                     | the tag equals the value                      |
+  | `!env:prod`                                    | the tag differs or, on Prometheus, is missing |
+  | `service:api-*`                                | wildcard; `*` matches any characters          |
+  | `service:*`                                    | the tag is present                            |
+  | `env IN (prod,dev)`                            | any of the values                             |
+  | `env NOT IN (dev)`                             | none of the values                            |
+  | `service:api OR path:/health`                  | either filter                                 |
+  | `NOT (method:GET OR method:HEAD)`              | neither filter                                |
+  | `env:prod AND (service:api OR service:worker)` | parentheses group filters                     |
+
+  `AND`, `OR` and `NOT` are uppercase; `NOT` binds tighter than `AND`, `AND` (or a comma) tighter than `OR`. Typing
+  suggests tag values for the term at the cursor, also inside `(` and as the values of `key IN (`, and `AND`, `OR`
+  and `)` after a complete term and a space, where Enter closes the open parenthesis or adds the text. Enter adds
+  the text once its parentheses are closed; a group becomes one chip such as `(service:api OR service:worker)`, and
+  a click on a chip turns it back into text. In this field a comma outside parentheses always ends a chip, so
+  `a:1 OR b:2, c:3` typed here means `(a:1 OR b:2), c:3`.
 
 - **avg by**: the space aggregation (`avg`, `sum`, `min`, `max`; distributions add `count` and `p50`…`p99`) and the
   tags to group by. Counters start as `sum by` and show an `as count | rate` switch.
@@ -170,8 +182,10 @@ The `</>` mode and the [`q` link parameter](#deep-links) use this form:
 
 - `<aggregator>`: `avg`, `sum`, `min`, `max`, `count`, `p50`, `p75`, `p90`, `p95`, `p99`. Without it (`metric{*}`)
   the metric's default applies.
-- `{*}` or `{}` means no filter; otherwise the filters above, comma-separated. Quote values that contain `,`, `{`,
-  `}`, `(`, `)`, `"` or `\`: `path:"/a,b"`.
+- `{*}` or `{}` means no filter; otherwise the filters above, separated by commas or combined with `AND`, `OR`,
+  `NOT` and parentheses: `{env:prod AND (service:api OR service:worker), !status:5*}`. A comma is `AND` here, so
+  `{a:1 OR b:2, c:3}` is `a:1 OR (b:2 AND c:3)`; the explorer writes groups in parentheses. Quote values that
+  contain `,`, `{`, `}`, `(`, `)`, `"`, `\` or a separate word `AND` or `OR`: `path:"/a,b"`.
 - `by {…}` is optional.
 - Dotted modifiers follow the query: `.as_count()`, `.as_rate()`, `.rollup(<agg>, <seconds>)` (or `.rollup(60)`),
   `.fill(<method>, <limit>)`.
@@ -232,6 +246,7 @@ values (top 24 by default) ranked by avg, max, min or sum.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | Metric                 | ↑ ↓ move, Enter picks (or keeps the typed name), Tab completes the highlighted metric, Esc closes                        |
 | from, by               | ↑ ↓ move, Enter picks or adds the typed text, `,` adds it, Backspace on an empty field removes the last chip, Esc closes |
+| from, in `(` or `IN (` | Enter picks and keeps editing until the last parenthesis is closed; `,` separates terms or values                        |
 | Σ Modify               | type to search, ↑ ↓ move, → opens a category, ← goes back, Enter adds, Esc closes                                        |
 | `</>` text mode, alias | Enter applies, Esc cancels                                                                                               |
 
@@ -260,6 +275,7 @@ Examples (shown unencoded for readability):
 ```text
 /d/metrics-explorer?q=avg:node_load1{*}&from=now-1h&to=now
 /d/metrics-explorer?q=sum:http_requests_total{env:prod,!status:5*} by {service}.as_count()&display=bars
+/d/metrics-explorer?q=sum:http_requests_total{env:prod, NOT (method:GET OR method:HEAD)} by {service}.as_count()
 /d/metrics-explorer?q=sum:http_requests_total{status:5*} by {service}.as_count()&q=sum:http_requests_total{*} by {service}.as_count()&f=a/b*100
 /d/metrics-explorer?q=top(avg:node_cpu_seconds_total{mode:idle} by {cpu}, 5, 'mean', 'desc')
 /d/metrics-explorer?q=avg:node_load1{*} by {instance}&split=instance&from=now-6h&to=now
@@ -301,6 +317,13 @@ instance, gives the default.
   including scraped ones without the label, use `rate(m[R])` with `R = max(step, 4 × export interval)`; `as_count`
   multiplies it by the step, so it is a smoothed estimate, not an exact count. Distributions follow the same split on
   their `_bucket`, `_sum` and `_count` streams.
+- **Boolean filters.** `NOT` is pushed down to the tag matchers (`NOT (a OR b)` is `!a AND !b`) and the filter is
+  expanded into OR branches. Branches that differ only in the values of one key become one regex matcher, so
+  `env:prod AND (service:api OR service:worker)` stays one selector, `{env="prod",service=~"(?:api|worker)"}`.
+  Otherwise every read of the metric is repeated per branch and the reads are joined with PromQL `or` before the
+  space aggregation: `sum(A or B)`, where `A` and `B` are `sum_over_time(m{…}[60s])` with each branch's matchers.
+  `or` keeps a series that two branches select once. A filter may have at most 16 branches. Tag suggestions and the
+  group estimate of the series cap use only the top-level terms outside groups, so they are an upper bound.
 - **Missing and empty labels.** Exclusions (`!key:value`) use plain `!=`/`!~` matchers: Prometheus keeps series
   that do not carry the key, OpenObserve drops them. Add `key:*` to require the key on both. Grouping can return a
   series without the key next to one where it is empty; legends show them as `N/A` and `""`.

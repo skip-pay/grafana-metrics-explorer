@@ -4,8 +4,8 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { Icon, useStyles2 } from '@grafana/ui';
 
 import { Catalog, isLowPriorityKey, searchTags, TagMatch, TagPair, TimeWindow } from '../../catalog';
-import { filterToText, parseFilterText } from '../../compile';
-import { ResolvedMetric, TagFilter } from '../../model/types';
+import { filterTerms, filterToText, isFilterGroup, parseScopeText, quoteValue, topLevelFilters } from '../../compile';
+import { FilterGroup, FilterItem, ResolvedMetric, TagFilter } from '../../model/types';
 import { ChipInput, ChipModel } from './ChipInput';
 import { Highlight } from './Highlight';
 import { getEditorColors, getEditorStyles } from './styles';
@@ -13,11 +13,11 @@ import { SuggestionItem } from './SuggestionList';
 import { splitOutsideParens } from './utils';
 
 export interface TagFilterFieldProps {
-  filters: TagFilter[];
+  filters: FilterItem[];
   resolved?: ResolvedMetric;
   catalog: Catalog;
   timeWindow: TimeWindow;
-  onChange: (filters: TagFilter[]) => void;
+  onChange: (filters: FilterItem[]) => void;
   /** The chosen metric; tells "no metric yet" apart from "still resolving" in the empty list. */
   metric?: string;
 }
@@ -34,9 +34,17 @@ const SYNTAX: Array<[string, string]> = [
   ['key IN (a,b)', 'any of the values'],
   ['key NOT IN (a,b)', 'none of the values'],
   ['a:1, b:2', 'comma = AND (the same key twice matches either value)'],
+  ['a:1 OR b:2', 'either filter'],
+  ['NOT (a:1 OR b:2)', 'neither; NOT binds tighter than AND, AND than OR'],
+  ['a:1 AND (b:2 OR c:3)', 'parentheses group filters'],
 ];
 
-type Option = { kind: 'pair'; match: TagMatch } | { kind: 'custom'; filter: TagFilter; text: string };
+/** A term for the token, a value of an IN list, an operator, or the whole text as typed. */
+type Option =
+  | { kind: 'pair'; match: TagMatch }
+  | { kind: 'value'; value: string; ranges: Array<[number, number]> }
+  | { kind: 'keyword'; keyword: string }
+  | { kind: 'custom'; text: string };
 
 interface PairsState {
   key: string;
@@ -44,11 +52,15 @@ interface PairsState {
   done: boolean;
 }
 
-/** The "from" field: `key:value` chips with progressive suggestions from the catalogue. */
+/**
+ * The "from" field: one chip per top-level filter, a term or a group, with progressive suggestions from the
+ * catalogue for the token being typed.
+ */
 export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChange, metric }: TagFilterFieldProps) => {
   const styles = useStyles2(getStyles);
   const editorStyles = useStyles2(getEditorStyles);
   const [text, setText] = useState('');
+  const [caret, setCaret] = useState(0);
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
@@ -56,9 +68,9 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
   const requested = useRef('');
 
   const labelKeys = resolved?.labelKeys;
-  // Suggestions are narrowed by the chips that can match (OpenObserve ignores unknown keys anyway).
+  // Suggestions are narrowed by the term chips that can match (OpenObserve ignores unknown keys anyway).
   const narrowing = useMemo(
-    () => (labelKeys ? filters.filter((f) => labelKeys.includes(f.key)) : []),
+    () => (labelKeys ? topLevelFilters(filters).filter((f) => labelKeys.includes(f.key)) : []),
     [filters, labelKeys]
   );
   // Minute buckets keep a moving relative range from refetching on every refresh.
@@ -95,11 +107,12 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
   const current = pairsState.key === requestKey;
   const pairs = useMemo(() => (current ? pairsState.pairs : []), [current, pairsState.pairs]);
   const loading = resolved !== undefined && (!current || !pairsState.done);
-  const options = useMemo(() => buildOptions(text, pairs, filters), [text, pairs, filters]);
+  const options = useMemo(() => buildOptions(text, caret, pairs, filters), [text, caret, pairs, filters]);
 
-  const suggestions: SuggestionItem[] = options.map((option, i) =>
-    option.kind === 'pair'
-      ? {
+  const suggestions: SuggestionItem[] = options.map((option, i) => {
+    switch (option.kind) {
+      case 'pair':
+        return {
           id: `${option.match.negated ? '!' : ''}${option.match.pair.key}:${option.match.pair.value}`,
           content: (
             <>
@@ -107,18 +120,34 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
               <Highlight text={`${option.match.pair.key}:${option.match.pair.value}`} ranges={option.match.ranges} />
             </>
           ),
-        }
-      : {
+        };
+      case 'value':
+        return { id: `value-${option.value}`, content: <Highlight text={option.value} ranges={option.ranges} /> };
+      case 'keyword':
+        return {
+          id: `keyword-${option.keyword}`,
+          content: <span className={cx(styles.keyword, editorStyles.negation)}>{option.keyword}</span>,
+        };
+      case 'custom':
+        return {
           id: `custom-${i}`,
           content: (
             <span className={styles.custom}>
               Add filter <code>{option.text}</code>
             </span>
           ),
-        }
-  );
+        };
+    }
+  });
 
-  const add = (added: TagFilter[]) => {
+  /** Puts `value` in the input with the caret at `at`, by default the end. */
+  const edit = (value: string, at = value.length) => {
+    setText(value);
+    setCaret(at);
+    setError(undefined);
+  };
+
+  const add = (added: FilterItem[]) => {
     const seen = new Set(filters.map((f) => JSON.stringify(f)));
     const fresh = added.filter((f) => {
       const id = JSON.stringify(f);
@@ -131,66 +160,99 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
     if (fresh.length > 0) {
       onChange([...filters, ...fresh]);
     }
-    setText('');
-    setError(undefined);
-  };
-
-  const pick = (index: number) => {
-    const option = options[index];
-    if (!option) {
-      return;
-    }
-    if (option.kind === 'custom') {
-      add([option.filter]);
-      return;
-    }
-    const { pair, negated } = option.match;
-    add([{ key: pair.key, op: negated ? 'neq' : 'eq', values: [pair.value] }]);
+    edit('');
   };
 
   const commit = (value: string) => {
-    const parsed = parseFilterText(value);
+    const parsed = parseScopeText(value);
     if ('error' in parsed) {
+      edit(value);
       setError(parsed.error);
       return;
     }
-    add([parsed]);
+    add(parsed);
   };
 
+  /**
+   * Commits `head` and the text after the caret once no group or IN list is left open; until then the caret goes
+   * after `head` to continue there.
+   */
+  const commitWhenClosed = (head: string, rest: string) => {
+    if (typingAt(head + rest).open === 0) {
+      commit(head + rest);
+    } else {
+      // The space after a complete term brings up AND, OR and ")".
+      edit(`${head} ${rest.trimStart()}`, head.length + 1);
+    }
+  };
+
+  /** A picked suggestion replaces the token before the caret; the text after the caret stays. */
+  const pick = (index: number) => {
+    const option = options[index];
+    const head = text.slice(0, caret);
+    const rest = text.slice(caret);
+    const before = head.slice(0, typingAt(head).start);
+    switch (option?.kind) {
+      case 'custom':
+        commit(option.text);
+        return;
+      case 'pair': {
+        const { pair, negated } = option.match;
+        const term = filterToText({ key: pair.key, op: negated ? 'neq' : 'eq', values: [pair.value] });
+        commitWhenClosed(before + term, rest);
+        return;
+      }
+      case 'value': {
+        const next = before + quoteValue(option.value);
+        edit(next + rest, next.length);
+        return;
+      }
+      case 'keyword':
+        if (option.keyword === ')') {
+          commitWhenClosed(`${head.trimEnd()})`, rest);
+        } else {
+          const next = `${head.replace(/\S*$/, '')}${option.keyword} `;
+          edit(next + rest.trimStart(), next.length);
+        }
+        return;
+    }
+  };
+
+  /** A pasted list becomes chips when the field is empty; into typed text it is inserted at the caret. */
   const paste = (pasted: string) => {
     const parts = splitOutsideParens(pasted);
-    if (parts.length < 2) {
+    if (parts.length < 2 || text.trim() !== '') {
       return false;
     }
-    const valid: TagFilter[] = [];
+    const valid: FilterItem[] = [];
     const invalid: string[] = [];
     let firstError: string | undefined;
     for (const part of parts) {
-      const parsed = parseFilterText(part);
+      const parsed = parseScopeText(part);
       if ('error' in parsed) {
         invalid.push(part);
         firstError ??= parsed.error;
       } else {
-        valid.push(parsed);
+        valid.push(...parsed);
       }
     }
     add(valid);
     if (invalid.length > 0) {
-      setText(invalid.join(', '));
+      edit(invalid.join(', '));
       setError(firstError);
     }
     return true;
   };
 
-  const chips: ChipModel[] = filters.map((f, i) => {
-    const unknown = labelKeys !== undefined && !labelKeys.includes(f.key);
+  const chips: ChipModel[] = filters.map((item, i) => {
+    const unknown = labelKeys && filterTerms([item]).find((f) => !labelKeys.includes(f.key));
     return {
-      id: `${i}:${JSON.stringify(f)}`,
-      prefix: f.op === 'neq' ? <span className={editorStyles.negation}>!</span> : undefined,
-      content: <FilterChipContent filter={f} />,
-      label: chipLabel(f),
-      invalid: unknown,
-      tooltip: unknown && resolved ? `Tag \`${f.key}\` does not exist on \`${resolved.name}\`` : undefined,
+      id: `${i}:${JSON.stringify(item)}`,
+      prefix: !isFilterGroup(item) && item.op === 'neq' ? <span className={editorStyles.negation}>!</span> : undefined,
+      content: isFilterGroup(item) ? <GroupChipContent group={item} /> : <FilterChipContent filter={item} />,
+      label: isFilterGroup(item) ? filterToText(item) : chipLabel(item),
+      invalid: unknown !== undefined,
+      tooltip: unknown && resolved ? `Tag \`${unknown.key}\` does not exist on \`${resolved.name}\`` : undefined,
     };
   });
 
@@ -210,18 +272,18 @@ export const TagFilterField = ({ filters, resolved, catalog, timeWindow, onChang
         setText(value);
         setError(undefined);
       }}
+      caret={caret}
+      onCaretChange={setCaret}
       suggestions={suggestions}
       onPick={pick}
       onCommit={commit}
       onRemoveChip={(index) => onChange(filters.filter((_, j) => j !== index))}
       onEditChip={(index) => {
-        setText(filterToText(filters[index]));
-        setError(undefined);
+        edit(filterToText(filters[index]));
         onChange(filters.filter((_, j) => j !== index));
       }}
       onClear={() => {
-        setText('');
-        setError(undefined);
+        edit('');
         onChange([]);
       }}
       onPasteText={paste}
@@ -289,6 +351,33 @@ const FilterChipContent = ({ filter }: { filter: TagFilter }) => {
   );
 };
 
+/** A group as its text, with the operators styled and each term as in its own chip. */
+const GroupChipContent = ({ group }: { group: FilterGroup }) => {
+  const styles = useStyles2(getStyles);
+  const editorStyles = useStyles2(getEditorStyles);
+  const keyword = cx(styles.keyword, editorStyles.negation);
+  return (
+    <>
+      {group.negated && <span className={keyword}>NOT </span>}
+      {'('}
+      {group.items.map((item, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <span className={keyword}>{` ${group.op.toUpperCase()} `}</span>}
+          {isFilterGroup(item) ? (
+            <GroupChipContent group={item} />
+          ) : (
+            <>
+              {item.op === 'neq' && <span className={editorStyles.negation}>!</span>}
+              <FilterChipContent filter={item} />
+            </>
+          )}
+        </React.Fragment>
+      ))}
+      {')'}
+    </>
+  );
+};
+
 function chipLabel(f: TagFilter): string {
   switch (f.op) {
     case 'eq':
@@ -320,10 +409,6 @@ function mergePairs(existing: TagPair[], added: TagPair[]): TagPair[] {
   return merged;
 }
 
-/**
- * Suggestions for the typed text: ranked `key:value` pairs without the ones already chosen, plus an
- * "Add filter" row when the text is a valid filter of its own (first for wildcards and IN lists, last otherwise).
- */
 /** Keys with few values first (environment before path), low-priority keys last; values keep their order. */
 function byFewestValues(pairs: TagPair[]): TagPair[] {
   const counts = new Map<string, number>();
@@ -338,33 +423,182 @@ function byFewestValues(pairs: TagPair[]): TagPair[] {
     .map(({ pair }) => pair);
 }
 
-function buildOptions(text: string, pairs: TagPair[], filters: TagFilter[]): Option[] {
-  const query = text.trim();
+interface Typing {
+  /** Start of the token being typed: after the last "(", ",", AND, OR or NOT, or at a closed group or IN list. */
+  start: number;
+  /** Groups and IN lists left open. */
+  open: number;
+  /** The token is a value of this key's `key IN (` list. */
+  inKey?: string;
+  /** Values already in that list. */
+  listed: string[];
+}
+
+const KEYWORD = /^(?:AND|OR|NOT)(?=[\s(])/;
+const IN_LIST = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(?:NOT\s+)?IN\s*$/i;
+
+function unquote(value: string): string {
+  return value.startsWith('"') ? value.slice(1, value.length > 1 && value.endsWith('"') ? -1 : undefined) : value;
+}
+
+/** Where the token being typed at the end of `text` starts, following the scope grammar. */
+function typingAt(text: string): Typing {
+  const frames: Array<{ start: number; inKey?: string; listed: string[] }> = [];
+  let start = 0;
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '\\') {
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+      }
+      continue;
+    }
+    const token = text.slice(start, i);
+    const frame = frames[frames.length - 1];
+    const fresh = token.trim() === '';
+    const keyword = frame?.inKey === undefined && (fresh || /\s$/.test(token)) ? KEYWORD.exec(text.slice(i))?.[0] : '';
+    if (c === '"') {
+      quoted = true;
+    } else if (c === '(') {
+      const list = IN_LIST.exec(token);
+      if (list || fresh) {
+        frames.push({ start, inKey: list?.[1], listed: [] });
+        start = i + 1;
+      }
+    } else if (c === ')' && frame) {
+      // A closed group or IN list is one operand, typed from where it started.
+      frames.pop();
+      start = frame.start;
+    } else if (c === ',') {
+      if (frame?.inKey !== undefined) {
+        frame.listed.push(unquote(token.trim()));
+      }
+      start = i + 1;
+    } else if (keyword && (keyword !== 'NOT' || fresh)) {
+      i += keyword.length - 1;
+      start = i + 1;
+    }
+  }
+  while (/\s/.test(text.charAt(start))) {
+    start++;
+  }
+  const frame = frames[frames.length - 1];
+  return { start, open: frames.length, inKey: frame?.inKey, listed: frame?.listed ?? [] };
+}
+
+/** True when the text after the caret closes the group or IN list open at the caret. */
+function closedAfter(rest: string): boolean {
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (quoted) {
+      if (c === '\\') {
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+      }
+    } else if (c === '"') {
+      quoted = true;
+    } else if (c === '(') {
+      depth++;
+    } else if (c === ')' && depth-- === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** "Add filter" with the whole text, when it is a valid filter. */
+function addOption(text: string): Option[] {
+  const whole = text.trim();
+  const parsed = parseScopeText(whole);
+  return 'error' in parsed || parsed.length === 0 ? [] : [{ kind: 'custom', text: whole }];
+}
+
+/**
+ * Suggestions for the token before the caret: AND, OR (and ")" in a group not closed after the caret) after a
+ * complete term and a space, ranked `key:value` pairs without the ones already chosen, and an "Add filter" row when
+ * the whole text is a valid filter (first after a space or when the token is a wildcard, IN list or group, last
+ * otherwise). Inside `key IN (`, the key's values.
+ */
+function buildOptions(text: string, caret: number, pairs: TagPair[], filters: FilterItem[]): Option[] {
+  const head = text.slice(0, caret);
+  const typing = typingAt(head);
+  const token = head.slice(typing.start);
+  const closable = typing.open > 0 && !closedAfter(text.slice(caret));
+  if (typing.inKey !== undefined) {
+    // In a list closed after the caret, Enter adds the whole text instead of closing it.
+    const done: Option[] = closable ? [{ kind: 'keyword', keyword: ')' }] : addOption(text);
+    return valueOptions(typing.inKey, unquote(token.trim()), typing.listed, pairs, done);
+  }
+  const tail = /^([\s\S]*\S)\s+(\S*)$/.exec(token);
+  // With nothing typed after the space, Enter closes the open group or commits the text.
+  const finish = tail?.[2] === '';
+  const keywords: Option[] =
+    tail && !('error' in parseScopeText(tail[1]))
+      ? (closable ? [')', 'AND', 'OR'] : ['AND', 'OR'])
+          .filter((keyword) => keyword.startsWith(tail[2]))
+          .map((keyword) => ({ kind: 'keyword', keyword }))
+      : [];
+
+  const query = token.trim();
   const negated = query.startsWith('!');
-  const used = new Set(filters.filter((f) => f.op === 'eq' || f.op === 'neq').map(chipLabel));
+  const used = new Set(
+    topLevelFilters(filters)
+      .filter((f) => f.op === 'eq' || f.op === 'neq')
+      .map(chipLabel)
+  );
   const textOf = (m: TagMatch) => `${m.negated ? '!' : ''}${m.pair.key}:${m.pair.value}`;
-  const matches =
-    query === '' || query === '!'
+  const matches = query.includes('(')
+    ? []
+    : query === '' || query === '!'
       ? byFewestValues(pairs)
           .slice(0, MAX_SUGGESTIONS + used.size)
           .map((pair) => ({ pair, negated, score: 0, ranges: [] }))
       : searchTags(query, pairs, MAX_SUGGESTIONS + used.size);
+  // After a complete term, the pair it already names is left out.
   const options: Option[] = matches
-    .filter((m) => !used.has(textOf(m)))
+    .filter((m) => !used.has(textOf(m)) && !(keywords.length > 0 && textOf(m) === query))
     .slice(0, MAX_SUGGESTIONS)
     .map((match) => ({ kind: 'pair', match }));
-  if (query !== '' && query !== '!' && !matches.some((m) => textOf(m) === query)) {
-    const parsed = parseFilterText(query);
-    if (!('error' in parsed) && !used.has(chipLabel(parsed))) {
-      const custom: Option = { kind: 'custom', filter: parsed, text: query };
-      if (/[*(]/.test(query)) {
-        options.unshift(custom);
-      } else {
-        options.push(custom);
-      }
-    }
+
+  const whole = text.trim();
+  const named = !finish && matches.some((m) => textOf(m) === whole);
+  const parsed = whole !== '' && !named ? parseScopeText(whole) : [];
+  if ('error' in parsed || parsed.length === 0) {
+    return [...keywords, ...options];
   }
-  return options;
+  const single = parsed.length === 1 && !isFilterGroup(parsed[0]) ? parsed[0] : undefined;
+  if (single && used.has(chipLabel(single))) {
+    return [...keywords, ...options];
+  }
+  const custom: Option = { kind: 'custom', text: whole };
+  if (finish) {
+    return [custom, ...keywords, ...options];
+  }
+  return /[*(]/.test(query) ? [...keywords, custom, ...options] : [...keywords, ...options, custom];
+}
+
+/** Values of an IN list's key not listed yet, and `done` (")" or "Add filter"): first once the value is a known one. */
+function valueOptions(key: string, value: string, listed: string[], pairs: TagPair[], done: Option[]): Option[] {
+  const own = pairs.filter((p) => p.key === key);
+  const offset = key.length + 1;
+  const values = searchTags(`${key}:${value}`, own, MAX_SUGGESTIONS + listed.length + 1)
+    .filter((m) => m.pair.value !== value && !listed.includes(m.pair.value))
+    .slice(0, MAX_SUGGESTIONS)
+    .map((m): Option => ({
+      kind: 'value',
+      value: m.pair.value,
+      ranges: m.ranges.filter(([from]) => from >= offset).map(([from, to]) => [from - offset, to - offset]),
+    }));
+  if (value === '') {
+    return values;
+  }
+  return own.some((p) => p.value === value) ? [...done, ...values] : [...values, ...done];
 }
 
 const getStyles = (theme: GrafanaTheme2) => {

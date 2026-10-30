@@ -40,7 +40,10 @@ them, ask instead of guessing a hostname.
 query      = function "(" query { "," argument } ")"
            | [ aggregator ":" ] metric "{" scope "}" [ "by" "{" key { "," key } "}" ] { modifier }
 aggregator = avg | sum | min | max | count | p50 | p75 | p90 | p95 | p99
-scope      = "*" | filter { "," filter }
+scope      = "*" | or
+or         = and { "OR" and }
+and        = unary { ( "AND" | "," ) unary }
+unary      = "NOT" unary | "(" or ")" | filter
 filter     = key ":" value               equals; value may contain * wildcards; key:* means "has the tag"
            | "!" key ":" value           differs; on Prometheus also series without the tag
            | key "IN" "(" value { "," value } ")"
@@ -56,9 +59,12 @@ modifier   = ".as_count()" | ".as_rate()" | ".rollup(" [ rollup_agg "," ] second
   (`<m>_bucket` families). There and on CloudWatch metrics `count` counts observations; elsewhere it counts series,
   and `.as_count()` / `.as_rate()` do not change it. An aggregator a metric does not support skips the row with a
   message.
-- **Filters**: separate with commas. Filters on the same key are ORed, different keys ANDed. Double-quote values
-  that contain `,`, `{`, `}`, `(`, `)`, `"` or `\`: `path:"/a,b"`. `AND`, `OR`, `NOT …` (other than `NOT IN`),
-  `!key:*` and template variables (`$var`) are not supported.
+- **Filters**: separate with commas or combine with `AND`, `OR`, `NOT` and parentheses, in uppercase. `NOT` binds
+  tighter than `AND`, and `AND` (a comma is `AND`) tighter than `OR`, so put an OR in parentheses:
+  `{env:prod, (service:api OR service:worker)}`. Within one AND list, filters on the same key are ORed and
+  different keys ANDed. Double-quote values that contain `,`, `{`, `}`, `(`, `)`, `"`, `\` or a separate word `AND`
+  or `OR`: `path:"/a,b"`. `!key:*`, `NOT key:*` and template variables (`$var`) are not supported, and a filter may
+  expand to at most 16 OR branches.
 - **Tag keys** (in filters, `by {…}` and `split`): letters, digits and `_`, starting with a letter or `_`.
 - **Counters**: `.as_count()` (events per interval, the default) or `.as_rate()` (events per second).
 - **Rollup**: `rollup_agg` is `avg`, `count`, `max`, `min` or `sum`; `seconds` 0 means automatic. `.rollup(60)`
@@ -167,6 +173,12 @@ Encoded as `URLSearchParams` writes it:
 
 ```text
 /d/metrics-explorer?q=sum:http_requests_total{env:prod,!status:5*,method IN (GET,HEAD)} by {route}.as_rate()
+```
+
+**Either of two conditions** (one service, or one route of any service):
+
+```text
+/d/metrics-explorer?q=sum:http_requests_total{env:prod AND (service:api OR route:/checkout)} by {status}.as_count()
 ```
 
 ## Pitfalls

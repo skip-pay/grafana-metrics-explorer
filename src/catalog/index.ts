@@ -153,7 +153,10 @@ export class Catalog {
     }).catch(() => DEFAULT_CADENCE_SEC);
   }
 
-  /** Values of `key` in the window under the "from" filters (capped at 1000 by OpenObserve). */
+  /**
+   * Values of `key` in the window under filter terms (capped at 1000 by OpenObserve). Callers pass the top-level
+   * terms of a "from" filter, so with groups in it the values are an upper bound.
+   */
   async labelValues(metric: ResolvedMetric, key: string, filters: TagFilter[], range: TimeWindow): Promise<string[]> {
     return this.fetchValues(labelStream(metric), key, filtersToMatchers(filters), range);
   }

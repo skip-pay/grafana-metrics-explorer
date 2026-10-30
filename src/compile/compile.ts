@@ -1,6 +1,6 @@
 import { formulaError } from '../engine/formula';
 import { ExplorerState, FunctionCall, MetricQuery } from '../model/types';
-import { filtersToMatchers, isValidLabelKey } from './filters';
+import { filterBranches, filterTerms, isValidLabelKey } from './filters';
 import { getFunction, isDottedModifier, normalizeArgs, timeshiftOffsetSec } from './functions';
 import { buildTemplate, capGroups, isResolved, RollupAgg, TemplateInput } from './promql';
 import { cadenceSec, chooseStep } from './step';
@@ -91,19 +91,21 @@ function compileQuery(
   if (!METRIC_NAME.test(q.metric)) {
     return skip(`Invalid metric name "${q.metric}"`);
   }
-  for (const key of [...q.filters.map((f) => f.key), ...groupBy]) {
+  const terms = filterTerms(q.filters);
+  for (const key of [...terms.map((f) => f.key), ...groupBy]) {
     if (!isValidLabelKey(key)) {
       return skip(`Invalid tag key "${key}"`);
     }
   }
   if (isResolved(info)) {
-    const unknown = q.filters.find((f) => !info.labelKeys.includes(f.key));
+    const unknown = terms.find((f) => !info.labelKeys.includes(f.key));
     if (unknown) {
       return skip(`Tag \`${unknown.key}\` does not exist on \`${q.metric}\``);
     }
   }
-  if (q.filters.some((f) => f.op === 'neq' && f.values[0] === '*')) {
-    return skip('Filtering on a missing tag (!key:*) is not supported');
+  const branches = filterBranches(q.filters);
+  if ('error' in branches) {
+    return skip(branches.error);
   }
 
   const mods = readModifiers(q.functions);
@@ -114,7 +116,7 @@ function compileQuery(
   const input: TemplateInput = {
     name: q.metric,
     info,
-    matchers: filtersToMatchers(q.filters),
+    branches,
     spaceAgg: q.spaceAgg,
     groupBy,
     countMode: mods.countMode,

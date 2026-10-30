@@ -1,4 +1,4 @@
-import React, { useId, useRef, useState } from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { css, cx } from '@emotion/css';
 import { GrafanaTheme2 } from '@grafana/data';
 import { Icon, Tooltip, useStyles2 } from '@grafana/ui';
@@ -23,6 +23,10 @@ export interface ChipInputProps {
   chips: ChipModel[];
   text: string;
   onTextChange: (text: string) => void;
+  /** Where the caret goes when the parent sets the text; the browser keeps its own when omitted. */
+  caret?: number;
+  /** The caret moved: typing, a click or a key such as the arrows. */
+  onCaretChange?: (caret: number) => void;
   suggestions: SuggestionItem[];
   onPick: (index: number) => void;
   /** Enter (nothing highlighted) or `,` with typed text; the parent decides whether it becomes a chip. */
@@ -55,6 +59,8 @@ export const ChipInput = ({
   chips,
   text,
   onTextChange,
+  caret,
+  onCaretChange,
   suggestions,
   onPick,
   onCommit,
@@ -82,6 +88,13 @@ export const ChipInput = ({
   const [active, setActive] = useState(0);
   const listId = useId();
   const activeIndex = suggestions.length === 0 ? -1 : Math.min(active, suggestions.length - 1);
+
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (caret !== undefined && input && input === document.activeElement && input.selectionStart !== caret) {
+      input.setSelectionRange(caret, caret);
+    }
+  }, [text, caret]);
 
   const setOpen = (next: boolean) => {
     if (next !== open) {
@@ -143,7 +156,7 @@ export const ChipInput = ({
         }
         return;
       case ',':
-        if (!insideParens(text)) {
+        if (!insideParens(text.slice(0, e.currentTarget.selectionStart ?? text.length))) {
           e.preventDefault();
           if (text.trim() !== '') {
             onCommit(text.trim());
@@ -152,6 +165,9 @@ export const ChipInput = ({
         return;
     }
   };
+
+  const reportCaret = (e: React.SyntheticEvent<HTMLInputElement>) =>
+    onCaretChange?.(e.currentTarget.selectionStart ?? e.currentTarget.value.length);
 
   const focusInput = (e: React.MouseEvent) => {
     if (e.target !== inputRef.current) {
@@ -200,10 +216,14 @@ export const ChipInput = ({
             spellCheck={false}
             onChange={(e) => {
               onTextChange(e.target.value);
+              onCaretChange?.(e.target.selectionStart ?? e.target.value.length);
               setActive(0);
               setOpen(true);
             }}
             onKeyDown={onKeyDown}
+            // After the key or click has moved the caret; a pick's own caret is set by then.
+            onKeyUp={reportCaret}
+            onClick={reportCaret}
             onFocus={() => setOpen(true)}
             onBlur={() => setOpen(false)}
             onPaste={(e) => {

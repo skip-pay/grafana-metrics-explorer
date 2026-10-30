@@ -1,0 +1,28 @@
+# Prometheus scraping itself, node-exporter and Grafana, and Grafana with the built plugin and the explorer
+# dashboard. From the repository root: npm ci && npm run build && docker compose -f demo/docker-compose.yaml up
+name: metrics-explorer-demo
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+
+  grafana:
+    image: grafana/grafana:13.1.1
+    depends_on:
+      - prometheus
+    ports:
+      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: skippay-metricsexplorer-panel
+      # Skips downloading Grafana's default app plugins, which the demo does not use.
+      GF_PLUGINS_PREINSTALL_DISABLED: 'true'
+    volumes:
+      - ../dist:/var/lib/grafana/plugins/skippay-metricsexplorer-panel:ro
+      - ./provisioning:/etc/grafana/provisioning:ro

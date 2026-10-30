@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "panel",
+  "name": "Metrics Explorer",
+  "id": "skippay-metricsexplorer-panel",
+  "skipDataQuery": true,
+  "info": {
+    "keywords": ["panel", "metrics", "explorer", "prometheus", "promql", "openobserve"],
+    "description": "Interactive metrics explorer for Prometheus-compatible datasources",
+    "author": {
+      "name": "Skip Pay"
+    },
+    "logos": {
+      "small": "logo.svg",
+      "large": "logo.svg"
+    },
+    "links": [
+      { "name": "GitHub", "url": "https://github.com/skip-pay/grafana-metrics-explorer" },
+      { "name": "Issues", "url": "https://github.com/skip-pay/grafana-metrics-explorer/issues" }
+    ],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=13.1.0",
+    "plugins": []
+  }
+}

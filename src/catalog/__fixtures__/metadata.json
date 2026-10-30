@@ -1,0 +1,166 @@
+{
+  "status": "success",
+  "data": {
+    "checkout_order_value": [
+      {
+        "type": "histogram",
+        "unit": "currency",
+        "help": "Value of placed orders."
+      }
+    ],
+    "checkout_orders_cancelled_total": [
+      {
+        "type": "counter",
+        "unit": "{order}",
+        "help": "Orders cancelled."
+      }
+    ],
+    "checkout_orders_total": [
+      {
+        "type": "counter",
+        "unit": "{order}",
+        "help": "Orders placed."
+      }
+    ],
+    "checkout_payments_failed_total": [
+      {
+        "type": "counter",
+        "unit": "",
+        "help": "Payments that failed."
+      }
+    ],
+    "http_client_request_duration": [
+      {
+        "type": "histogram",
+        "unit": "millisecond",
+        "help": "Duration of HTTP requests sent."
+      }
+    ],
+    "http_client_requests_total": [
+      {
+        "type": "counter",
+        "unit": "{request}",
+        "help": "HTTP requests sent to other services."
+      }
+    ],
+    "http_server_active_requests": [
+      {
+        "type": "gauge",
+        "unit": "{request}",
+        "help": "Requests in flight."
+      }
+    ],
+    "http_server_request_duration": [
+      {
+        "type": "histogram",
+        "unit": "ms",
+        "help": "Duration of HTTP requests served."
+      }
+    ],
+    "http_server_requests_total": [
+      {
+        "type": "counter",
+        "unit": "{request}",
+        "help": "HTTP requests served."
+      }
+    ],
+    "job_queue_task_duration": [
+      {
+        "type": "histogram",
+        "unit": "second",
+        "help": "Time a task runs."
+      }
+    ],
+    "job_queue_task_wait_time": [
+      {
+        "type": "histogram",
+        "unit": "s",
+        "help": "Time a task waits in the queue."
+      }
+    ],
+    "job_queue_tasks_total": [
+      {
+        "type": "counter",
+        "unit": "{task}",
+        "help": "Background tasks run."
+      }
+    ],
+    "otelcol_processor_tail_sampling_sampling_policy_execution_count": [
+      {
+        "type": "counter",
+        "unit": "",
+        "help": "Policy executions."
+      }
+    ],
+    "queue_batch_size": [
+      {
+        "type": "histogram",
+        "unit": "{message}",
+        "help": "Messages per received batch."
+      }
+    ],
+    "queue_message_processing_duration": [
+      {
+        "type": "histogram",
+        "unit": "s",
+        "help": "Time to process one message."
+      }
+    ],
+    "queue_messages_deleted": [
+      {
+        "type": "counter",
+        "unit": "{message}",
+        "help": "Messages handled by the consumer."
+      }
+    ],
+    "queue_messages_processed": [
+      {
+        "type": "counter",
+        "unit": "{message}",
+        "help": "Messages handled by the consumer."
+      }
+    ],
+    "user_logins_total": [
+      {
+        "type": "counter",
+        "unit": "",
+        "help": "Successful logins."
+      }
+    ],
+    "user_signups_finished_total": [
+      {
+        "type": "counter",
+        "unit": "",
+        "help": "Signups finished."
+      }
+    ],
+    "user_signups_total": [
+      {
+        "type": "counter",
+        "unit": "",
+        "help": "Signups started."
+      }
+    ],
+    "worker_pool_active_workers": [
+      {
+        "type": "gauge",
+        "unit": "{worker}",
+        "help": "Workers of a pool."
+      }
+    ],
+    "worker_pool_desired_workers": [
+      {
+        "type": "gauge",
+        "unit": "{worker}",
+        "help": "Workers of a pool."
+      }
+    ],
+    "worker_pool_pending_workers": [
+      {
+        "type": "gauge",
+        "unit": "{worker}",
+        "help": "Workers of a pool."
+      }
+    ]
+  }
+}

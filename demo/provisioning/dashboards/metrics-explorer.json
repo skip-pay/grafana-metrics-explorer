@@ -1,0 +1,86 @@
+{
+  "description": "Interactive metrics explorer: pick a metric with autocomplete, filter and group by tags, apply functions and formulas, and split the chart by a tag. The state lives in the URL, so a link reopens the same view. Time ranges are capped at 24 hours. Full window height: /d/metrics-explorer?autofitpanels",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 28,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "maxRangeHours": 24
+      },
+      "title": "",
+      "transparent": true,
+      "type": "skippay-metricsexplorer-panel"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 42,
+  "tags": ["metrics"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "quick_ranges": [
+      {
+        "display": "Last 5 minutes",
+        "from": "now-5m",
+        "to": "now"
+      },
+      {
+        "display": "Last 15 minutes",
+        "from": "now-15m",
+        "to": "now"
+      },
+      {
+        "display": "Last 30 minutes",
+        "from": "now-30m",
+        "to": "now"
+      },
+      {
+        "display": "Last 1 hour",
+        "from": "now-1h",
+        "to": "now"
+      },
+      {
+        "display": "Last 3 hours",
+        "from": "now-3h",
+        "to": "now"
+      },
+      {
+        "display": "Last 6 hours",
+        "from": "now-6h",
+        "to": "now"
+      },
+      {
+        "display": "Last 12 hours",
+        "from": "now-12h",
+        "to": "now"
+      },
+      {
+        "display": "Last 24 hours",
+        "from": "now-24h",
+        "to": "now"
+      }
+    ]
+  },
+  "timezone": "browser",
+  "title": "Metrics Explorer",
+  "uid": "metrics-explorer",
+  "weekStart": ""
+}

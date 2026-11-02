@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- `Split by: Query` draws one graph per query and formula, stacked so that their time axes line up, each with its
+  own y axis. A query without data keeps an empty graph.
+- Applied functions follow the query in its row; they and Σ Modify move to the next line only when the row is full.
+
 ## 0.2.1
 
 - In the `from` field, `OR …` typed after the chips joins the last chip, e.g. `(service:api OR service:worker)`,

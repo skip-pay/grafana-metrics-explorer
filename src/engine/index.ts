@@ -3,6 +3,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import type { CompiledPlan } from '../compile';
 import { ExplorerState, MetricInfo } from '../model/types';
 import { EvaluateResult } from './evaluate';
+import { alignAxes } from './fit';
 import { formulaError } from './formula';
 import {
   barChart,
@@ -17,7 +18,6 @@ import {
   toplistChart,
   uniformRange,
   VizContext,
-  VizRow,
 } from './viz';
 
 export { CLIENT_FUNCTIONS } from './clientFunctions';
@@ -30,8 +30,9 @@ export type { Palette } from './palette';
 export type { ChartModel } from './viz';
 
 /**
- * One chart model per chart: a single chart, or one timeseries tile per split value (titled by the value, with
- * shared soft y bounds). Hidden rows are left out.
+ * One chart model per chart: a single chart, one timeseries tile per row that ran (split by query, each on its own
+ * y axis, also without data) or one per split value (titled by the value, with shared soft y bounds). Hidden rows
+ * are left out.
  */
 export function buildCharts(
   state: ExplorerState,
@@ -40,9 +41,7 @@ export function buildCharts(
   _theme: GrafanaTheme2,
   _metrics: Record<string, MetricInfo | undefined>
 ): ChartModel[] {
-  const rows: VizRow[] = result.rows
-    .filter((r) => !r.hidden)
-    .map((r) => ({ ...r, series: result.seriesByRow[r.ref] ?? [] }));
+  const rows = result.rows.filter((r) => !r.hidden).map((r) => ({ ...r, series: result.seriesByRow[r.ref] ?? [] }));
   const ctx: VizContext = { title: plan.title, timeRange: result.timeRange, stepSec: result.stepSec };
   switch (state.viz) {
     case 'toplist':
@@ -59,6 +58,16 @@ export function buildCharts(
       return [barChart(rows, state, ctx)];
     case 'piechart':
       return [pieChart(rows, state, ctx)];
+  }
+  const skipped = new Set(plan.queries.filter((q) => q.skip).map((q) => q.letter));
+  const tiles = state.split.byQuery ? rows.filter((r) => !skipped.has(r.ref) && !result.rowErrors[r.ref]) : [];
+  if (tiles.length > 0) {
+    // A formula is titled by its expression; its legend name spells out the queries.
+    return alignAxes(
+      tiles.map((row) =>
+        timeseriesChart([row], state, ctx, { title: row.kind === 'formula' ? row.label : row.ungroupedName })
+      )
+    );
   }
   const key = state.split.key;
   const parts = key ? partition(rows, { ...state.split, key }, result.stepSec) : [];

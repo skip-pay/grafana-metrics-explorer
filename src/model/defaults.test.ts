@@ -39,7 +39,7 @@ describe('defaultState', () => {
       orderBy: 'values',
       reverse: false,
     });
-    expect(state.split).toEqual({ key: null, limit: 24, order: 'top', sortBy: 'avg' });
+    expect(state.split).toEqual({ byQuery: false, key: null, limit: 24, order: 'top', sortBy: 'avg' });
     expect(state.reducer).toBe('avg');
     expect(state.toplistLimit).toBe(10);
   });

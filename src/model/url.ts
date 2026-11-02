@@ -339,6 +339,7 @@ function toSplit(raw: unknown, d: SplitOptions): SplitOptions {
   const o = obj(raw, 'split');
   const key = o.key === undefined || o.key === null ? null : str(o.key, undefined, 'split.key');
   return {
+    byQuery: bool(o.byQuery, d.byQuery, 'split.byQuery'),
     key: key === '' ? null : key,
     limit: oneOf(o.limit, SPLIT_LIMITS, d.limit, 'split.limit'),
     order: oneOf(o.order, SPLIT_ORDERS, d.order, 'split.order'),

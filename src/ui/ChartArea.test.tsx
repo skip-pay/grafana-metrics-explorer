@@ -128,6 +128,15 @@ describe('ChartArea', () => {
     expect(lastRendered().props.width).toBe(Math.floor((782 - 16 - 8) / 2));
   });
 
+  it('stacks the tiles of a split by query in one column', () => {
+    const charts = ['avg:cpu{*}', 'avg:mem{*}'].map((t) => chart(t, ['x']));
+    render(<ChartArea {...props} split stacked width={1200} charts={charts} />);
+    expect(screen.getByText('avg:mem{*}')).toBeInTheDocument();
+    // Inner size 1182 x 582: 1 column and 2 rows.
+    expect(lastRendered().props.width).toBe(1182);
+    expect(lastRendered().props.height).toBe(Math.floor((582 - 8) / 2) - 22);
+  });
+
   it('uses 3 columns, 1 or 2 on narrow widths, never more than charts', () => {
     expect(splitColumns(400, 12)).toBe(1);
     expect(splitColumns(700, 12)).toBe(2);

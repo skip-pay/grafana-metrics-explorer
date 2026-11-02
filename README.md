@@ -32,7 +32,7 @@ backend with a time-range cap and series limits.
   and pie chart.
 - **Display options**: value labels on the line, line style and stroke, eleven palettes (Classic, Vivid, Consistent
   and sequential ones), order by tags or values, per-query colour overrides.
-- **Split by** a tag: one graph per tag value.
+- **Split by** query or tag: one graph per query and formula, or per tag value.
 - **Share**: copy link, copy PromQL, open the compiled queries in Grafana Explore.
 - **Counters done right**: delta (OpenTelemetry) and cumulative counters, histograms and CloudWatch metric streams
   each get their own PromQL template; the step is aligned with the metric's export cadence.
@@ -72,7 +72,7 @@ The plugin is not signed, so Grafana loads it only when its id is listed in `all
 ```ini
 [plugins]
 allow_loading_unsigned_plugins = skippay-metricsexplorer-panel
-preinstall = skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip
+preinstall = skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip
 ```
 
 The same as environment variables: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS` and `GF_PLUGINS_PREINSTALL`. Both
@@ -96,7 +96,7 @@ deprecated `GF_INSTALL_PLUGINS`):
 grafana.ini:
   plugins:
     allow_loading_unsigned_plugins: skippay-metricsexplorer-panel
-    preinstall: skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip
+    preinstall: skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip
 ```
 
 ### Docker
@@ -104,18 +104,18 @@ grafana.ini:
 ```bash
 docker run -d -p 127.0.0.1:3000:3000 \
   -e GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=skippay-metricsexplorer-panel \
-  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.2.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip \
+  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip \
   grafana/grafana:13.1.1
 ```
 
 ### Grafana CLI or by hand
 
 ```bash
-grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.2.1/skippay-metricsexplorer-panel-0.2.1.zip \
+grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip \
   plugins install skippay-metricsexplorer-panel
 ```
 
-Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.2.1.zip.sha256`, unzip it into
+Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.3.0.zip.sha256`, unzip it into
 Grafana's plugin directory (`/var/lib/grafana/plugins` by default) and restart Grafana.
 
 ## Creating the dashboard
@@ -237,8 +237,9 @@ common group tags. Hide the queries a formula uses by clicking their letters.
 
 ### Split by
 
-On a timeseries, `Split by: Tags` draws one graph per value of a tag, limited to the top or bottom 6, 12, 24 or 48
-values (top 24 by default) ranked by avg, max, min or sum.
+On a timeseries, `Split by: Query` draws one graph per query and formula, stacked so that their time axes line up,
+each with its own y axis; a query without data keeps an empty graph. `Split by: Tags` draws one graph per value of a
+tag, limited to the top or bottom 6, 12, 24 or 48 values (top 24 by default) ranked by avg, max, min or sum.
 
 ![Split by](docs/screenshots/split.png)
 

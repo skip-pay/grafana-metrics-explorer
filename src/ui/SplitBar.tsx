@@ -18,7 +18,7 @@ interface Props {
   exploreUrl?: string;
 }
 
-type Mode = 'none' | 'tags';
+type Mode = 'none' | 'query' | 'tags';
 
 const ORDER_OPTIONS: Array<MenuSelectOption<SplitOptions['order']>> = [
   { value: 'top', label: 'Top' },
@@ -30,13 +30,14 @@ const SORT_OPTIONS: Array<MenuSelectOption<Reducer>> = (['avg', 'max', 'min', 's
   label: r,
 }));
 
-/** `Split by: None ▾` (one graph per tag value when set) with the Share menu at the right end. */
+/** `Split by: None ▾` (one graph per query or per tag value when set) with the Share menu at the right end. */
 export const SplitBar = ({ split, keys, onChange, onCopyLink, onCopyPromql, exploreUrl }: Props) => {
   const styles = useStyles2(getStyles);
   const [shareOpen, setShareOpen] = useState(false);
   const allKeys = keys && split.key && !keys.includes(split.key) ? [split.key, ...keys] : keys;
   const modes: Array<MenuSelectOption<Mode>> = [
     { value: 'none', label: 'None' },
+    { value: 'query', label: 'Query', description: 'One graph per query and formula' },
     {
       value: 'tags',
       label: 'Tags',
@@ -61,9 +62,9 @@ export const SplitBar = ({ split, keys, onChange, onCopyLink, onCopyPromql, expl
           <MenuSelect
             variant="bordered"
             label="Split by:"
-            value={split.key ? 'tags' : 'none'}
+            value={split.byQuery ? 'query' : split.key ? 'tags' : 'none'}
             options={modes}
-            onChange={(mode) => onChange({ key: mode === 'tags' ? allKeys[0] : null })}
+            onChange={(mode) => onChange({ byQuery: mode === 'query', key: mode === 'tags' ? allKeys[0] : null })}
           />
         )}
         <span className={styles.spacer} />

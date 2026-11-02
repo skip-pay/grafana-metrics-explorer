@@ -154,8 +154,12 @@ describe('Explorer', () => {
     expect(mockCatalog.resolve).toHaveBeenCalledWith('cpu', expect.anything());
     expect(screen.queryByText('Pick a metric to start')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Split by' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Query/ }));
+    expect(urlState().split).toMatchObject({ byQuery: true, key: null });
+    expect(screen.queryByText('One graph per')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Split by' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /^Tags/ }));
-    expect(urlState().split).toMatchObject({ key: 'env' });
+    expect(urlState().split).toMatchObject({ byQuery: false, key: 'env' });
     expect(screen.getByText('One graph per')).toBeInTheDocument();
     expect(screen.getByText('Limit to')).toBeInTheDocument();
     expect(screen.getByText('Sort by')).toBeInTheDocument();

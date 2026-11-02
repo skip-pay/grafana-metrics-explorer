@@ -19,10 +19,12 @@ const TILE_TITLE_HEIGHT = 22;
 interface Props {
   title: string;
   charts: ChartModel[];
-  /** One tile per split value instead of one chart. */
+  /** One tile per split value or query instead of one chart. */
   split: boolean;
   /** The split tag key; tiles are titled by the tag value alone. */
   splitKey?: string | null;
+  /** Tiles of different queries: in one column, so that their time axes line up, each with its own y range. */
+  stacked?: boolean;
   loading: boolean;
   errors: string[];
   warnings: string[];
@@ -39,6 +41,7 @@ export const ChartArea = ({
   charts,
   split,
   splitKey,
+  stacked,
   loading,
   errors,
   warnings,
@@ -73,6 +76,7 @@ export const ChartArea = ({
       <SplitGrid
         charts={charts}
         splitKey={splitKey}
+        stacked={stacked}
         width={innerWidth}
         height={bodyHeight}
         timeZone={timeZone}
@@ -146,22 +150,27 @@ function tileTitle(title: string, key?: string | null): string {
 interface GridProps {
   charts: ChartModel[];
   splitKey?: string | null;
+  stacked?: boolean;
   width: number;
   height: number;
   timeZone: string;
   onChangeTimeRange: (range: AbsoluteTimeRange) => void;
 }
 
-const SplitGrid = ({ charts, splitKey, width, height, timeZone, onChangeTimeRange }: GridProps) => {
+const SplitGrid = ({ charts, splitKey, stacked, width, height, timeZone, onChangeTimeRange }: GridProps) => {
   const styles = useStyles2(getStyles);
-  const columns = splitColumns(width, charts.length);
+  const columns = stacked ? 1 : splitColumns(width, charts.length);
   const rows = Math.ceil(charts.length / columns);
   const fitHeight = Math.floor((height - GAP * (rows - 1)) / rows) - TILE_TITLE_HEIGHT;
   const chartHeight = Math.max(MIN_TILE_HEIGHT, fitHeight);
   // Leave room for the scrollbar when the tiles do not fit.
   const usable = fitHeight < MIN_TILE_HEIGHT ? width - 16 : width;
   const tileWidth = Math.floor((usable - GAP * (columns - 1)) / columns);
-  const fitted = useMemo(() => fitTiles(charts, tileWidth, chartHeight), [charts, tileWidth, chartHeight]);
+  // Tiles of different queries keep their own y ranges.
+  const fitted = useMemo(
+    () => (stacked ? charts.map((c) => fitChart(c, tileWidth, chartHeight)) : fitTiles(charts, tileWidth, chartHeight)),
+    [charts, stacked, tileWidth, chartHeight]
+  );
   return (
     <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${columns}, ${tileWidth}px)` }}>
       {fitted.map((chart) => (

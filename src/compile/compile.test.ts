@@ -532,7 +532,7 @@ describe('plan', () => {
   it('adds the split key to every query on timeseries, and drops grouping for a query value', () => {
     const state = {
       ...stateWith(q('requests', 'sum', { groupBy: ['path'] }), q('gauge', 'avg', { groupBy: ['environment'] })),
-      split: { key: 'environment', limit: 12, order: 'top' as const, sortBy: 'avg' as const },
+      split: { byQuery: false, key: 'environment', limit: 12, order: 'top' as const, sortBy: 'avg' as const },
     };
     expect(compile(state, ctx()).queries.map((c) => c.expr)).toEqual([
       `sum by (path, environment) (sum_over_time(requests{${DELTA}}[60s]))`,
@@ -551,7 +551,7 @@ describe('plan', () => {
   it('keeps a split key that a delta counter otherwise collapses', () => {
     const state = {
       ...stateWith(q('requests', 'avg')),
-      split: { key: 'flag', limit: 12, order: 'top' as const, sortBy: 'avg' as const },
+      split: { byQuery: false, key: 'flag', limit: 12, order: 'top' as const, sortBy: 'avg' as const },
     };
     expect(compile(state, ctx()).queries[0].expr).toBe(
       `avg by (flag) (sum without (instance_id, start_time, exemplars) (sum_over_time(requests{${DELTA}}[60s])))`

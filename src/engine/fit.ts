@@ -1,4 +1,12 @@
-import { DataFrame, Field, FieldType, MappingType, ValueMapping } from '@grafana/data';
+import {
+  DataFrame,
+  Field,
+  FieldType,
+  formattedValueToString,
+  getValueFormat,
+  MappingType,
+  ValueMapping,
+} from '@grafana/data';
 
 import { LABEL_PREFIX } from './labels';
 import { isValue } from './series';
@@ -11,6 +19,10 @@ const TEXT_PAD_PX = 6;
 const LABEL_LIFT_PX = 8;
 const LABEL_HEIGHT_PX = 14;
 const Y_AXIS_PX = 56;
+/** Grafana's y axis around the tick labels: tick and gap, and with an axis label its gap and its size. */
+const AXIS_TICK_PX = 9;
+const AXIS_LABEL_GAP_PX = 8;
+const AXIS_LABEL_PX = 20;
 const X_AXIS_PX = 28;
 const EDGE_PX = 10;
 const LEGEND_ROW_PX = 22;
@@ -157,6 +169,56 @@ export function fitTiles(charts: ChartModel[], width: number, height: number): C
     const unitOf = (field: Field) => field.config.unit ?? chart.fieldConfig.defaults.unit ?? '';
     return { ...chart, data: { ...chart.data, series: withSoftMax(chart.data.series, maxima, unitOf) } };
   });
+}
+
+/**
+ * Gives tiles stacked in one column the same y axis width, so that their plots and time axes line up: room for
+ * the longest tick label of any tile, plus the axis label where a tile has one.
+ */
+export function alignAxes(charts: ChartModel[]): ChartModel[] {
+  const labelled = (chart: ChartModel) => Boolean(axisCustom(chart).axisLabel);
+  const total = Math.max(
+    ...charts.map(
+      (chart) => AXIS_TICK_PX + tickChars(chart) * CHAR_PX + (labelled(chart) ? AXIS_LABEL_GAP_PX + AXIS_LABEL_PX : 0)
+    )
+  );
+  return charts.map((chart) => {
+    // The axis label is drawn outside the axis width.
+    const axisWidth = Math.ceil(total - (labelled(chart) ? AXIS_LABEL_PX : 0));
+    const defaults = chart.fieldConfig.defaults;
+    return {
+      ...chart,
+      fieldConfig: { ...chart.fieldConfig, defaults: { ...defaults, custom: { ...defaults.custom, axisWidth } } },
+    };
+  });
+}
+
+function axisCustom(chart: ChartModel): { axisLabel?: string; stacking?: { mode?: string } } {
+  return chart.fieldConfig.defaults.custom ?? {};
+}
+
+/**
+ * Rough length of the longest y tick label: the extremes drawn (stacked sums for bars and areas) in the chart's
+ * unit, plus two characters for the decimals of ticks between them (`3.5` on an axis up to `4`).
+ */
+function tickChars(chart: ChartModel): number {
+  const stacked = axisCustom(chart).stacking?.mode === 'normal';
+  let hi = 0;
+  let lo = 0;
+  for (const frame of chart.data.series) {
+    let max = 0;
+    let min = 0;
+    for (const v of (valueField(frame)?.values ?? []) as Array<number | null>) {
+      if (isValue(v)) {
+        max = Math.max(max, v);
+        min = Math.min(min, v);
+      }
+    }
+    hi = stacked ? hi + max : Math.max(hi, max);
+    lo = stacked ? lo + min : Math.min(lo, min);
+  }
+  const format = getValueFormat(chart.fieldConfig.defaults.unit);
+  return Math.max(...[hi, lo].map((v) => formattedValueToString(format(v)).length)) + 2;
 }
 
 function numberFields(chart: ChartModel): Field[] {

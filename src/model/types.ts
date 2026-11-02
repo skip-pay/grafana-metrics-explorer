@@ -84,7 +84,8 @@ export interface DisplayOptions {
 }
 
 export interface SplitOptions {
-  key: string | null;
+  byQuery: boolean;             // one graph per query and formula; key is then null
+  key: string | null;           // one graph per value of this tag
   limit: number;                // 6, 12, 24, 48
   order: 'top' | 'bottom';
   sortBy: Reducer;              // ranks the split values

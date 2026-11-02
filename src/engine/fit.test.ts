@@ -1,7 +1,7 @@
 import { createTheme, DataFrame } from '@grafana/data';
 
 import { ExplorerState, MetricInfo } from '../model/types';
-import { fitChart, fitTiles, legendFit } from './fit';
+import { alignAxes, fitChart, fitTiles, legendFit } from './fit';
 import { buildCharts, evaluate } from './index';
 import { compiled, panelData, plan, promFrame, query, state } from './testFixtures';
 
@@ -88,7 +88,7 @@ describe('fitTiles', () => {
   it('keeps one y range: the highest raised soft max goes to every tile', () => {
     const s = state({
       queries: [query('a', { metric: 'cpu' })],
-      split: { key: 'env', limit: 24, order: 'top', sortBy: 'avg' },
+      split: { byQuery: false, key: 'env', limit: 24, order: 'top', sortBy: 'avg' },
     });
     const p = plan([compiled('a', { textForm: 'avg:cpu{*}' })]);
     const frames = [
@@ -99,6 +99,20 @@ describe('fitTiles', () => {
     const maxima = tiles.map((t) => (t.data.series[0].fields[1].config.custom as { axisSoftMax?: number }).axisSoftMax);
     expect(maxima[0]).toBeGreaterThan(9);
     expect(maxima[1]).toBe(maxima[0]);
+  });
+});
+
+describe('alignAxes', () => {
+  it('gives stacked tiles one y axis width, the axis label drawn outside it', () => {
+    const percent = chart({ '': flat(5) });
+    const big = chart({ '': flat(1234567) });
+    const custom = { ...big.fieldConfig.defaults.custom, axisLabel: undefined };
+    const plain = { ...big, fieldConfig: { defaults: { custom }, overrides: [] } };
+    const [a, b] = alignAxes([percent, plain]);
+    // `1234567` and two characters of 6.5 px, after the tick.
+    expect(b.fieldConfig.defaults.custom.axisWidth).toBe(Math.ceil(9 + 9 * 6.5));
+    expect(a.fieldConfig.defaults.custom.axisWidth).toBe(Math.ceil(9 + 9 * 6.5) - 20);
+    expect(a.fieldConfig.defaults.custom.axisLabel).toBe('Percent');
   });
 });
 

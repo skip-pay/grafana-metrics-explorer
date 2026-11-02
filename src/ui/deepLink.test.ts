@@ -98,7 +98,7 @@ describe('stateFromLink', () => {
     expect(warning).toBeUndefined();
     expect(state.viz).toBe('toplist');
     expect(state.display.display).toBe('bars');
-    expect(state.split).toEqual({ key: 'instance', limit: 24, order: 'top', sortBy: 'avg' });
+    expect(state.split).toEqual({ byQuery: false, key: 'instance', limit: 24, order: 'top', sortBy: 'avg' });
   });
 
   it('keeps what parsed and names every parameter that did not', () => {

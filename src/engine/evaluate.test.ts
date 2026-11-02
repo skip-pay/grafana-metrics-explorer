@@ -48,7 +48,7 @@ describe('evaluate', () => {
   it('adds the split key to the group keys of a split timeseries', () => {
     const s = state({
       queries: [query('a', { groupBy: ['host'] })],
-      split: { key: 'env', limit: 12, order: 'top', sortBy: 'avg' },
+      split: { byQuery: false, key: 'env', limit: 12, order: 'top', sortBy: 'avg' },
     });
     const frames = [promFrame('a', { host: 'x', env: 'prod' }, ramp(1))];
     const result = evaluate(plan([compiled('a')]), panelData(frames), s, metrics);

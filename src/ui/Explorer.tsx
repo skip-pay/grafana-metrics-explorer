@@ -181,8 +181,9 @@ export const Explorer = ({ width, height, timeRange, timeZone, onChangeTimeRange
       <ChartArea
         title={data.plan?.title ?? ''}
         charts={data.charts}
-        split={state.viz === 'timeseries' && state.split.key !== null}
+        split={state.viz === 'timeseries' && (state.split.byQuery || state.split.key !== null)}
         splitKey={state.split.key}
+        stacked={state.split.byQuery}
         loading={data.loading || pending}
         errors={data.errors}
         warnings={warnings}

@@ -249,7 +249,7 @@ describe('split by', () => {
   const split = (limit: number, display: Partial<DisplayOptions> = {}, options: Partial<SplitOptions> = {}) => {
     const s = state({
       queries: [query('a', { metric: 'cpu', groupBy: ['host'] })],
-      split: { key: 'env', limit, order: 'top', sortBy: 'avg', ...options },
+      split: { byQuery: false, key: 'env', limit, order: 'top', sortBy: 'avg', ...options },
       ...withDisplay(display),
     });
     const frames = [
@@ -301,10 +301,56 @@ describe('split by', () => {
   });
 
   it('no series: a single empty chart', () => {
-    const s = state({ split: { key: 'env', limit: 12, order: 'top', sortBy: 'avg' } });
+    const s = state({ split: { byQuery: false, key: 'env', limit: 12, order: 'top', sortBy: 'avg' } });
     const result = charts(s, plan([compiled('a')]), []);
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe('avg:m{*}');
+  });
+});
+
+describe('split by query', () => {
+  const byQuery = (frames: DataFrame[]) => {
+    const s = state({
+      queries: [
+        query('a', { metric: 'cpu', groupBy: ['host'] }),
+        query('b', { metric: 'mem' }),
+        query('c'),
+        query('d'),
+      ],
+      split: { ...state().split, byQuery: true },
+    });
+    const p = plan(
+      [
+        compiled('a', { textForm: 'avg:cpu{*} by {host}' }),
+        compiled('b', { textForm: 'avg:mem{*}' }),
+        compiled('c'),
+        compiled('d', { skip: 'Choose a metric' }),
+      ],
+      [formula(1, 'b / 2'), formula(2, '')]
+    );
+    return charts(s, p, frames);
+  };
+
+  it('one chart per row that ran, titled by its query or formula, each on its own y axis', () => {
+    const tiles = byQuery([
+      promFrame('a', { host: 'x' }, flat(1)),
+      promFrame('a', { host: 'y' }, flat(4)),
+      promFrame('b', {}, flat(10)),
+    ]);
+    // c ran without data; d did not run and f2 failed.
+    expect(tiles.map((c) => c.title)).toEqual(['avg:cpu{*} by {host}', 'avg:mem{*}', 'avg:m{*}', 'b / 2']);
+    expect(tiles[2].data.series).toEqual([]);
+    expect(names(tiles[0].data)).toEqual(['y', 'x']);
+    expect(tiles[0].options.legend).toMatchObject({ showLegend: true });
+    expect(tiles[1].options.legend).toMatchObject({ showLegend: false });
+    expect(tiles.slice(0, 2).map((c) => c.fieldConfig.defaults.unit)).toEqual(['percent', 'bytes']);
+    expect(tiles[0].fieldConfig.defaults.custom.axisSoftMax).toBeUndefined();
+    // Labelled axes are 20 px narrower, so every plot starts at the same x.
+    const footprints = tiles.map((c) => {
+      const { axisWidth, axisLabel } = c.fieldConfig.defaults.custom;
+      return axisWidth + (axisLabel ? 20 : 0);
+    });
+    expect(new Set(footprints).size).toBe(1);
   });
 });
 

@@ -80,7 +80,7 @@ const sample = (): ExplorerState => ({
     orderBy: 'tags',
     reverse: true,
   },
-  split: { key: 'env', limit: 6, order: 'bottom', sortBy: 'max' },
+  split: { byQuery: false, key: 'env', limit: 6, order: 'bottom', sortBy: 'max' },
   reducer: 'max',
   toplistLimit: 25,
 });
@@ -210,7 +210,13 @@ describe('encodeState / decodeState', () => {
 
   it('fills a partial split with defaults', () => {
     const result = decodeState('{"v":1,"split":{"key":"env","limit":12}}');
-    expect(result.ok && result.state.split).toEqual({ key: 'env', limit: 12, order: 'top', sortBy: 'avg' });
+    expect(result.ok && result.state.split).toEqual({
+      byQuery: false,
+      key: 'env',
+      limit: 12,
+      order: 'top',
+      sortBy: 'avg',
+    });
   });
 
   it('gives a query without a letter a free one when z is taken', () => {
@@ -282,6 +288,7 @@ describe('encodeState / decodeState', () => {
     ['{"v":1,"formulas":[{"expression":1}]}', 'formulas[0].expression: expected a string'],
     ['{"v":1,"display":{"palette":"pink"}}', 'display.palette'],
     ['{"v":1,"display":{"reverse":"yes"}}', 'display.reverse: expected true or false'],
+    ['{"v":1,"split":{"byQuery":1}}', 'split.byQuery: expected true or false'],
     ['{"v":1,"split":{"limit":7}}', 'split.limit'],
     ['{"v":1,"split":{"order":"desc"}}', 'split.order'],
     ['{"v":1,"split":{"sortBy":"mean"}}', 'split.sortBy'],

@@ -67,7 +67,7 @@ export function defaultState(): ExplorerState {
       orderBy: 'values',
       reverse: false,
     },
-    split: { key: null, limit: 24, order: 'top', sortBy: 'avg' },
+    split: { byQuery: false, key: null, limit: 24, order: 'top', sortBy: 'avg' },
     reducer: 'avg',
     toplistLimit: 10,
   };

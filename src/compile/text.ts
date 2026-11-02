@@ -244,7 +244,26 @@ function resolveMetricName(name: string, metrics: MetricInfo[]): string | { erro
   return /^[A-Za-z_:][A-Za-z0-9_:]*$/.test(name) ? name : { error: `Unknown metric "${name}"` };
 }
 
-/** Parses the text form for raw mode and pasted queries. Dotted metric names resolve against the catalogue. */
+/**
+ * The histogram or CloudWatch metric whose `_sum` or `_count` stream the name is. The catalogue folds those streams
+ * into the metric, where `sum:` reads `_sum` and `count:` reads `_count`.
+ */
+function foldedStream(name: string, metrics: MetricInfo[]): { metric: string; part: 'sum' | 'count' } | undefined {
+  for (const m of metrics) {
+    if (m.kind === 'distribution' || m.kind === 'cloudwatch') {
+      const part = (['sum', 'count'] as const).find((p) => m.streams[p] === name);
+      if (part) {
+        return { metric: m.name, part };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Parses the text form for raw mode and pasted queries. Dotted metric names resolve against the catalogue;
+ * `sum:X_sum` and `sum:X_count` of a histogram or CloudWatch metric `X` read as `sum:X` and `count:X`.
+ */
 export function parseQueryText(text: string, metrics: MetricInfo[]): Partial<MetricQuery> | { error: string } {
   let parsed: ParsedQuery;
   try {
@@ -258,6 +277,14 @@ export function parseQueryText(text: string, metrics: MetricInfo[]): Partial<Met
       return { error: e.message };
     }
     throw e;
+  }
+  const folded = foldedStream(parsed.metric, metrics);
+  if (folded) {
+    if (parsed.spaceAgg !== undefined && parsed.spaceAgg !== 'sum') {
+      const hint = `${folded.part}:${folded.metric}{…}`;
+      return { error: `"${parsed.metric}" is the _${folded.part} stream of "${folded.metric}"; write ${hint}` };
+    }
+    return { ...parsed, metric: folded.metric, spaceAgg: folded.part };
   }
   const metric = resolveMetricName(parsed.metric, metrics);
   if (typeof metric !== 'string') {

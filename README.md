@@ -72,7 +72,7 @@ The plugin is not signed, so Grafana loads it only when its id is listed in `all
 ```ini
 [plugins]
 allow_loading_unsigned_plugins = skippay-metricsexplorer-panel
-preinstall = skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip
+preinstall = skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip
 ```
 
 The same as environment variables: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS` and `GF_PLUGINS_PREINSTALL`. Both
@@ -96,7 +96,7 @@ deprecated `GF_INSTALL_PLUGINS`):
 grafana.ini:
   plugins:
     allow_loading_unsigned_plugins: skippay-metricsexplorer-panel
-    preinstall: skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip
+    preinstall: skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip
 ```
 
 ### Docker
@@ -104,18 +104,18 @@ grafana.ini:
 ```bash
 docker run -d -p 127.0.0.1:3000:3000 \
   -e GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=skippay-metricsexplorer-panel \
-  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.3.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip \
+  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip \
   grafana/grafana:13.1.1
 ```
 
 ### Grafana CLI or by hand
 
 ```bash
-grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.0/skippay-metricsexplorer-panel-0.3.0.zip \
+grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip \
   plugins install skippay-metricsexplorer-panel
 ```
 
-Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.3.0.zip.sha256`, unzip it into
+Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.3.1.zip.sha256`, unzip it into
 Grafana's plugin directory (`/var/lib/grafana/plugins` by default) and restart Grafana.
 
 ## Creating the dashboard
@@ -195,6 +195,8 @@ The `</>` mode and the [`q` link parameter](#deep-links) use this form:
   quoted: `top(avg:m{*} by {host}, 10, 'max', 'desc')`.
 - Dots and underscores in metric names are interchangeable when the name is in the catalogue:
   `http.requests.total` finds `http_requests_total`.
+- A histogram or CloudWatch metric `X` is one metric for its `_sum` and `_count` streams: `sum:X_sum{…}` and
+  `sum:X_count{…}` read as `sum:X{…}` and `count:X{…}`; other aggregators on those streams are refused.
 
 ### Functions
 

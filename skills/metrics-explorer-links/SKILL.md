@@ -59,6 +59,11 @@ modifier   = ".as_count()" | ".as_rate()" | ".rollup(" [ rollup_agg "," ] second
   (`<m>_bucket` families). There and on CloudWatch metrics `count` counts observations; elsewhere it counts series,
   and `.as_count()` / `.as_rate()` do not change it. An aggregator a metric does not support skips the row with a
   message.
+- **Histograms and CloudWatch metrics**: write the bare name `X`, never a stream of it: the `X_bucket`, `X_sum`
+  and `X_count` streams of a histogram and the `X`, `X_sum` and `X_count` streams of a CloudWatch metric
+  (`amazonaws_com_…`) are all `X`. `avg:X` is the mean (CloudWatch's Average), `sum:X` the total of the values and
+  `count:X` the number of samples, so never divide a sum by a count in a formula. `sum:X_sum` and `sum:X_count`
+  still read as `sum:X` and `count:X`; any other aggregator on those streams is refused.
 - **Filters**: separate with commas or combine with `AND`, `OR`, `NOT` and parentheses, in uppercase. `NOT` binds
   tighter than `AND`, and `AND` (a comma is `AND`) tighter than `OR`, so put an OR in parentheses:
   `{env:prod, (service:api OR service:worker)}`. Within one AND list, filters on the same key are ORed and

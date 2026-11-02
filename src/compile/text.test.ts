@@ -22,9 +22,25 @@ function query(
 
 const CATALOG: MetricInfo[] = [
   { name: 'http_server_requests_total', kind: 'delta_counter', streams: { base: 'http_server_requests_total' } },
-  { name: 'http_client_request_duration', kind: 'distribution', streams: {} },
+  {
+    name: 'http_client_request_duration',
+    kind: 'distribution',
+    streams: {
+      bucket: 'http_client_request_duration_bucket',
+      sum: 'http_client_request_duration_sum',
+      count: 'http_client_request_duration_count',
+    },
+  },
   { name: 'worker_pool_active_workers', kind: 'gauge', streams: {} },
-  { name: 'amazonaws_com_aws_sqs_numberofmessagessent', kind: 'cloudwatch', streams: {} },
+  {
+    name: 'amazonaws_com_aws_sqs_numberofmessagessent',
+    kind: 'cloudwatch',
+    streams: {
+      base: 'amazonaws_com_aws_sqs_numberofmessagessent',
+      sum: 'amazonaws_com_aws_sqs_numberofmessagessent_sum',
+      count: 'amazonaws_com_aws_sqs_numberofmessagessent_count',
+    },
+  },
 ];
 
 const stripIds = (q: Partial<MetricQuery>) => ({
@@ -161,6 +177,25 @@ describe('parseQueryText', () => {
     expect(parse('p95:HTTP.CLIENT.REQUEST.DURATION{*}').metric).toBe('http_client_request_duration');
     expect(parseQueryText('avg:no.such.metric{*}', CATALOG)).toEqual({ error: 'Unknown metric "no.such.metric"' });
     expect(parse('avg:not_listed_yet{*}').metric).toBe('not_listed_yet');
+  });
+
+  it('reads the _sum and _count streams of histograms and CloudWatch metrics as sum and count of the metric', () => {
+    const cw = 'amazonaws_com_aws_sqs_numberofmessagessent';
+    expect(parse(`sum:${cw}_sum{queue:a} by {queue}`)).toMatchObject({
+      metric: cw,
+      spaceAgg: 'sum',
+      filters: [eq('queue', 'a')],
+      groupBy: ['queue'],
+    });
+    expect(parse(`sum:${cw}_count{*}`)).toMatchObject({ metric: cw, spaceAgg: 'count' });
+    expect(parse(`${h}_count{*}.as_rate()`)).toMatchObject({
+      metric: h,
+      spaceAgg: 'count',
+      functions: [{ name: 'as_rate', args: [] }],
+    });
+    expect(parseQueryText(`avg:${cw}_sum{*}`, CATALOG)).toEqual({
+      error: `"${cw}_sum" is the _sum stream of "${cw}"; write sum:${cw}{…}`,
+    });
   });
 
   it('takes the default aggregator of the metric kind when none is written', () => {

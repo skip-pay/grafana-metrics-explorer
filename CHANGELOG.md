@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- The query text and `q` links read `sum:X_sum{…}` and `sum:X_count{…}` of a histogram or CloudWatch metric `X` as
+  `sum:X{…}` and `count:X{…}`. Before, they failed with "Metric … does not exist", because the explorer shows those
+  streams only as part of `X`.
+
 ## 0.3.0
 
 - `Split by: Query` draws one graph per query and formula, stacked so that their time axes line up, each with its

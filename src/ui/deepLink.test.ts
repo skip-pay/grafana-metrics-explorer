@@ -11,6 +11,15 @@ const metrics: MetricInfo[] = [
   { name: 'http_requests_total', kind: 'cumulative_counter', streams: { base: 'http_requests_total' } },
   { name: 'node_load1', kind: 'gauge', streams: { base: 'node_load1' } },
   { name: 'node_cpu_seconds_total', kind: 'cumulative_counter', streams: { base: 'node_cpu_seconds_total' } },
+  {
+    name: 'amazonaws_com_aws_sqs_sentmessagesize',
+    kind: 'cloudwatch',
+    streams: {
+      base: 'amazonaws_com_aws_sqs_sentmessagesize',
+      sum: 'amazonaws_com_aws_sqs_sentmessagesize_sum',
+      count: 'amazonaws_com_aws_sqs_sentmessagesize_count',
+    },
+  },
 ];
 
 const REQUESTS = 'sum:http_requests_total{job:api,!status:5*} by {service}.as_count()';
@@ -21,6 +30,20 @@ const TOP = "top(avg:node_cpu_seconds_total{mode:idle} by {cpu}, 5, 'mean', 'des
 const parseSearch = (search: string) => readLinkParams(urlUtil.parseKeyValue(search))!;
 
 describe('stateFromLink', () => {
+  it('reads the _sum and _count streams of a CloudWatch metric as its sum and count', () => {
+    const link = parseSearch(
+      'q=sum%3Aamazonaws_com_aws_sqs_sentmessagesize_sum%7Bqueuename%3Aorders%7D%20by%20%7Bqueuename%7D' +
+        '&q=sum%3Aamazonaws_com_aws_sqs_sentmessagesize_count%7Bqueuename%3Aorders%7D%20by%20%7Bqueuename%7D&f=a%2Fb'
+    );
+    const { state, warning } = stateFromLink(link, metrics);
+    expect(warning).toBeUndefined();
+    expect(state.queries.map((q) => renderQueryText(q))).toEqual([
+      'sum:amazonaws_com_aws_sqs_sentmessagesize{queuename:orders} by {queuename}',
+      'count:amazonaws_com_aws_sqs_sentmessagesize{queuename:orders} by {queuename}',
+    ]);
+    expect(state.formulas.map((f) => f.expression)).toEqual(['a/b']);
+  });
+
   it('builds one row per q, lettered in order', () => {
     const { state, warning } = stateFromLink({ q: [REQUESTS, LOAD, TOP] }, metrics);
     expect(warning).toBeUndefined();

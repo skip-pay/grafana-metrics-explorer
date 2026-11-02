@@ -79,14 +79,14 @@ describe('QueryRow', () => {
     });
   });
 
-  it('shows count modifiers of counters in the "as" segment, other functions on a second line', () => {
+  it('shows count modifiers of counters in the "as" segment, other functions after it', () => {
     const asCount = { id: 'c', name: 'as_count', args: [] };
     const abs = { id: 'x', name: 'abs', args: [] };
     const { onChange } = setup({ metric: 'http_requests_total', spaceAgg: 'sum', functions: [asCount, abs] });
-    expect(screen.getAllByTestId('function-segment').map((p) => p.textContent)).toEqual(['abs']);
-    // Σ Modify follows the function segments instead of the row.
-    const row = screen.getByTestId('query-row-a');
-    expect(row.lastElementChild).toContainElement(screen.getByRole('button', { name: 'Modify' }));
+    const segments = screen.getAllByTestId('function-segment');
+    expect(segments.map((p) => p.textContent)).toEqual(['abs']);
+    // Σ Modify follows the function segments.
+    expect(segments[0].nextElementSibling).toContainElement(screen.getByRole('button', { name: 'Modify' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Counter mode: count' }));
     fireEvent.click(screen.getByRole('menuitemradio', { name: /^rate/ }));

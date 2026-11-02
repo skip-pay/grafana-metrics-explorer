@@ -25,7 +25,7 @@ backend with a time-range cap and series limits.
 - **Tag filters** with negation, wildcards, `IN` / `NOT IN` lists and boolean expressions with `AND`, `OR`, `NOT` and
   parentheses; grouping by any tag keys.
 - **Functions** (Σ Modify): arithmetic, boolean remapping, interpolation, timeshift, rate, smoothing, rollup, rank,
-  count, regression and exclusion, shown as editable pills under the row.
+  count, regression and exclusion, shown as editable pills after the query.
 - **Raw text mode** (`</>`) per row, e.g. `sum:http_requests_total{env:prod} by {service}.as_count()`.
 - **Formulas** over the query letters (`a / b * 100`), with aliases; hidden queries still feed formulas.
 - **Visualizations**: timeseries (lines, bars, areas), query value, table, heatmap, distribution, top list, bar chart
@@ -168,7 +168,8 @@ within the panel's maximum range.
 
 - **avg by**: the space aggregation (`avg`, `sum`, `min`, `max`; distributions add `count` and `p50`…`p99`) and the
   tags to group by. Counters start as `sum by` and show an `as count | rate` switch.
-- **Σ Modify**: adds a function. Applied functions appear as pills under the row; click one to edit its arguments.
+- **Σ Modify**: adds a function. Applied functions appear as pills before it, on the next line when the row is full;
+  click one to edit its arguments.
 - **Row actions**: `</>` edits the row as text, the palette sets the row's colour or palette, `as…` sets an alias,
   `⊗` deletes the row (not while a formula uses it).
 

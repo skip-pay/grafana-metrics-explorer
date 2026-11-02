@@ -41,12 +41,10 @@ export interface QueryRowProps {
 }
 
 const CLOUDWATCH_HINT = 'Each dimension set is a separate series — filter by dimensions to avoid double counting.';
-/** Left edge of the function line: under the metric field (badge + "Metrics" segment). */
-const FUNCTIONS_INDENT = ROW_HEIGHT + 84;
 
 /**
- * One query row: `a | Metrics | <metric> | from <tags> | <agg> by <keys> | as count | Σ Modify`, with
- * `</>`, colour, alias and delete on the right. Applied functions form a second line under the row.
+ * One query row: `a | Metrics | <metric> | from <tags> | <agg> by <keys> | as count | <functions> Σ Modify`, with
+ * `</>`, colour, alias and delete on the right.
  */
 export const QueryRow = ({
   query,
@@ -170,7 +168,15 @@ export const QueryRow = ({
                   <CountModifierSelect value={countMode} onChange={setCountMode} />
                 </span>
               )}
-              {shownFunctions.length === 0 && <span className={cx(styles.modify, styles.modifyInline)}>{modify}</span>}
+              <span className={styles.functions}>
+                <FunctionSegments
+                  functions={shownFunctions}
+                  onChange={(functions) =>
+                    onChange({ functions: counter ? [...countModifiers, ...functions] : functions })
+                  }
+                />
+                <span className={styles.modify}>{modify}</span>
+              </span>
             </>
           )}
         </div>
@@ -195,16 +201,6 @@ export const QueryRow = ({
           <DeleteButton label="Delete query" blocked={deleteBlocked} onClick={onRemove} />
         </div>
       </div>
-      {!raw && shownFunctions.length > 0 && (
-        <div className={styles.functions}>
-          <span className={styles.connector} aria-hidden />
-          <FunctionSegments
-            functions={shownFunctions}
-            onChange={(functions) => onChange({ functions: counter ? [...countModifiers, ...functions] : functions })}
-          />
-          <span className={styles.modify}>{modify}</span>
-        </div>
-      )}
       {warnings?.map((warning) => (
         <div key={warning} className={editorStyles.rowWarning}>
           {warning}
@@ -284,13 +280,19 @@ const getStyles = (theme: GrafanaTheme2) => {
       background: colors.metricBg,
       color: theme.colors.text.secondary,
     }),
+    // Applied functions and Σ Modify move to the next line together when they do not fit.
+    functions: css({
+      display: 'inline-flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      rowGap: theme.spacing(0.5),
+      columnGap: theme.spacing(1),
+      // Beats the joined-segment margin of the row.
+      marginLeft: `${theme.spacing(1)} !important`,
+    }),
     modify: css({
       display: 'inline-flex',
       '& > button': { borderRadius: theme.shape.radius.default },
-    }),
-    // Beats the joined-segment margin of the row.
-    modifyInline: css({
-      marginLeft: `${theme.spacing(1)} !important`,
     }),
     actions: css({
       display: 'flex',
@@ -298,21 +300,6 @@ const getStyles = (theme: GrafanaTheme2) => {
       gap: theme.spacing(0.5),
       height: ROW_HEIGHT,
       flexShrink: 0,
-    }),
-    functions: css({
-      display: 'flex',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      rowGap: theme.spacing(0.5),
-      columnGap: theme.spacing(1),
-      marginTop: theme.spacing(0.5),
-      paddingLeft: FUNCTIONS_INDENT - 12,
-    }),
-    connector: css({
-      width: 8,
-      height: 1,
-      marginRight: -4,
-      background: theme.colors.border.medium,
     }),
   };
 };

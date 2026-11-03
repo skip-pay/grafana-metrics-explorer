@@ -3,6 +3,7 @@ import {
   DataFrame,
   DataQueryError,
   DataQueryRequest,
+  dateTime,
   LoadingState,
   PanelData,
   QueryRunner,
@@ -13,7 +14,7 @@ import type { DataQuery } from '@grafana/schema';
 
 /** At most this many queries go into one request, so one explorer never loads the backend with more. */
 export const MAX_QUERIES_PER_REQUEST = 3;
-export const RUN_TIMEOUT_MS = 30_000;
+export const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface RunOutcome<T> {
   key: string;
@@ -27,6 +28,7 @@ export interface RunOutcome<T> {
 interface CurrentRun<T> {
   key: string;
   tag: T;
+  timeRange: TimeRange;
   chunks: QueryRunnerOptions[];
   index: number;
   series: DataFrame[];
@@ -36,8 +38,8 @@ interface CurrentRun<T> {
 
 /**
  * Runs one explorer request through a single Grafana QueryRunner, split into chunks of at most
- * MAX_QUERIES_PER_REQUEST queries that run one after another. A new run cancels the previous one; a
- * run still loading after RUN_TIMEOUT_MS is cancelled.
+ * MAX_QUERIES_PER_REQUEST queries over at most one slice of the time range that run one after another. A new run
+ * cancels the previous one; a run whose request is still loading after REQUEST_TIMEOUT_MS is cancelled.
  */
 export class SequentialRunner<T> {
   private current?: CurrentRun<T>;
@@ -46,23 +48,23 @@ export class SequentialRunner<T> {
   constructor(
     private readonly runner: QueryRunner,
     private readonly listener: (outcome: RunOutcome<T>) => void,
-    private readonly timeoutMs = RUN_TIMEOUT_MS
+    private readonly timeoutMs = REQUEST_TIMEOUT_MS
   ) {
     this.sub = runner.get().subscribe((data) => this.onData(data));
   }
 
-  run(key: string, tag: T, options: QueryRunnerOptions): void {
+  /** Runs `options`, a range longer than `sliceMs` in slices of that length. */
+  run(key: string, tag: T, options: QueryRunnerOptions, sliceMs = Infinity): void {
     this.stop();
-    const chunks = chunkOptions(options);
+    const chunks = chunkOptions(options, sliceMs);
     if (chunks.length === 0) {
       this.listener({ key, tag, loading: false, data: emptyData(options.timeRange) });
       return;
     }
-    const run: CurrentRun<T> = { key, tag, chunks, index: 0, series: [], errors: [] };
-    run.timer = setTimeout(() => this.timeout(run), this.timeoutMs);
+    const run: CurrentRun<T> = { key, tag, timeRange: options.timeRange, chunks, index: 0, series: [], errors: [] };
     this.current = run;
     this.listener({ key, tag, loading: true });
-    this.runner.run(chunks[0]);
+    this.send(run);
   }
 
   /** Stops the current run; nothing is reported for it any more. */
@@ -100,7 +102,7 @@ export class SequentialRunner<T> {
     run.errors.push(...(data.errors ?? []));
     run.index++;
     if (run.index < run.chunks.length) {
-      this.runner.run(run.chunks[run.index]);
+      this.send(run);
       return;
     }
     this.stop();
@@ -113,9 +115,15 @@ export class SequentialRunner<T> {
         state: run.errors.length > 0 && run.series.length === 0 ? LoadingState.Error : LoadingState.Done,
         series: run.series,
         errors: run.errors.length > 0 ? run.errors : undefined,
-        timeRange: chunk.timeRange,
+        timeRange: run.timeRange,
       },
     });
+  }
+
+  private send(run: CurrentRun<T>): void {
+    clearTimeout(run.timer);
+    run.timer = setTimeout(() => this.timeout(run), this.timeoutMs);
+    this.runner.run(run.chunks[run.index]);
   }
 
   private timeout(run: CurrentRun<T>): void {
@@ -128,12 +136,33 @@ export class SequentialRunner<T> {
   }
 }
 
-function chunkOptions(options: QueryRunnerOptions): QueryRunnerOptions[] {
+function chunkOptions(options: QueryRunnerOptions, sliceMs: number): QueryRunnerOptions[] {
   const chunks: QueryRunnerOptions[] = [];
-  for (let i = 0; i < options.queries.length; i += MAX_QUERIES_PER_REQUEST) {
-    chunks.push({ ...options, queries: options.queries.slice(i, i + MAX_QUERIES_PER_REQUEST) });
+  for (const timeRange of slices(options.timeRange, sliceMs)) {
+    for (let i = 0; i < options.queries.length; i += MAX_QUERIES_PER_REQUEST) {
+      chunks.push({ ...options, timeRange, queries: options.queries.slice(i, i + MAX_QUERIES_PER_REQUEST) });
+    }
   }
   return chunks;
+}
+
+/**
+ * The range cut every `sliceMs` from its start. With `sliceMs` a multiple of the step, the datasource aligns the end
+ * of a slice and the start of the next to the same timestamp, so the slices meet without a gap.
+ */
+function slices(range: TimeRange, sliceMs: number): TimeRange[] {
+  const from = range.from.valueOf();
+  const to = range.to.valueOf();
+  if (!(to - from > sliceMs)) {
+    return [range];
+  }
+  const out: TimeRange[] = [];
+  for (let start = from; start < to; start += sliceMs) {
+    const f = dateTime(start);
+    const t = dateTime(Math.min(start + sliceMs, to));
+    out.push({ from: f, to: t, raw: { from: f, to: t } });
+  }
+  return out;
 }
 
 function emptyData(timeRange: TimeRange): PanelData {

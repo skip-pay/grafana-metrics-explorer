@@ -33,3 +33,11 @@ export function chooseStep(rangeMs: number, viz: Visualization, display: Display
   const steps = [lcm, ...STEP_LADDER.filter((s) => s > lcm && s % lcm === 0)];
   return steps.find(fits) ?? Math.ceil(STEP_LADDER[STEP_LADDER.length - 1] / lcm) * lcm;
 }
+
+/** A range longer than this is read one slice after another, so that no request reads more of a stream. */
+export const MAX_SLICE_SEC = 24 * 3600;
+
+/** Length of the slices a long range is read in: the longest multiple of the step within MAX_SLICE_SEC. */
+export function sliceSec(stepSec: number): number {
+  return Math.max(1, Math.floor(MAX_SLICE_SEC / stepSec)) * stepSec;
+}

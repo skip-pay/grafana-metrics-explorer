@@ -598,6 +598,15 @@ describe('plan', () => {
     expect(one(q('requests', 'sum')).cappedExpr).toBeUndefined();
   });
 
+  it('ranks the groups of a range read in slices over its last slice at a fixed time', () => {
+    const week = { ...ctx(168), maxRangeHours: 168 };
+    const plan = compile(stateWith(q('requests', 'sum', { groupBy: ['path'] })), week);
+    expect(plan.stepSec).toBe(3600);
+    const at = Math.floor(TO / 1000 / 3600) * 3600;
+    const ranked = `sum by (path) (sum_over_time(requests{${DELTA}}[86400s] @ ${at}))`;
+    expect(plan.queries[0].cappedExpr).toBe(`(${plan.queries[0].expr}) and topk(200, ${ranked})`);
+  });
+
   it('carries row metadata, formulas and the title', () => {
     const state = stateWith(
       q('requests', 'sum', { groupBy: ['path'], functions: [fn('as_count')] }),

@@ -44,6 +44,15 @@ describe('frames to series', () => {
     expect(out[0].values[0]).toBe(1);
   });
 
+  it('the frames of a range read in slices fill one series per label set', () => {
+    const first = promFrame('a', { host: 'x' }, [1, 2, 3, 4, 5, 6], { times: promTimes().slice(0, 6) });
+    const second = promFrame('a', { host: 'x' }, [6, 7, 8, 9, 10, 11], { times: promTimes().slice(5) });
+    const other = promFrame('a', { host: 'y' }, [1], { times: promTimes().slice(5, 6) });
+    const out = framesToSeries([first, other, second], 'a', grid, STEP);
+    expect(out.map((s) => s.labels)).toEqual([{ host: 'x' }, { host: 'y' }]);
+    expect(out[0].values).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+
   it('drops __name__ and keeps explicitly empty labels', () => {
     const [s] = framesToSeries([promFrame('a', { __name__: 'm', host: '' }, [1])], 'a', grid, STEP);
     expect(s.labels).toEqual({ host: '' });

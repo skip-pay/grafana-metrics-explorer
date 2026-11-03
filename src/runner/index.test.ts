@@ -28,6 +28,8 @@ jest.mock('../catalog', () => ({ getCatalog: () => mockCatalog }));
 jest.mock('../compile', () => ({
   compile: jest.fn(),
   GROUP_LIMIT: 200,
+  MAX_SLICE_SEC: 24 * 3600,
+  sliceSec: jest.requireActual('../compile/step').sliceSec,
   topLevelFilters: jest.requireActual('../compile/filters').topLevelFilters,
 }));
 jest.mock('../engine', () => ({ evaluate: jest.fn(), buildCharts: jest.fn() }));
@@ -48,7 +50,7 @@ const resolved = (name: string): ResolvedMetric => ({
 
 /** A stand-in compiler: one `avg(<metric>)` per query with a metric; grouped ones get a capped variant. */
 function fakeCompile(state: ExplorerState, ctx: CompileContext): CompiledPlan {
-  const tooLong = ctx.range.to - ctx.range.from > 24 * 3600_000;
+  const tooLong = ctx.range.to - ctx.range.from > ctx.maxRangeHours * 3600_000;
   return {
     stepSec: 60,
     queries: state.queries
@@ -116,12 +118,12 @@ describe('useExplorerData', () => {
     jest.useRealTimers();
   });
 
-  const args = (timeRange = range(0)) => ({
+  const args = (timeRange = range(0), maxRangeHours = 24) => ({
     datasourceUid: 'ds',
     timeRange,
     timeZone: 'utc',
     widthPx: 800,
-    maxRangeHours: 24,
+    maxRangeHours,
   });
 
   it('runs nothing until a query has a metric', async () => {
@@ -224,6 +226,28 @@ describe('useExplorerData', () => {
       'avg(mem by env)',
     ]);
     expect(result.current.rowMessages).toEqual({ a: ['Showing the top 200 of ≈300 groups'] });
+  });
+
+  it('reads a range over 24 h a day at a time, groups ranked over its last 24 h', async () => {
+    const state = stateWith({ metric: 'cpu', groupBy: ['host'] });
+    mockCatalog.labelValues.mockResolvedValue(Array.from({ length: 300 }, (_, i) => `h${i}`));
+    const { result } = renderHook(() => useExplorerData(state, args(range(0, 60), 168)));
+    await flush();
+    act(() => jest.advanceTimersByTime(0));
+    respond(0);
+    respond(1);
+    respond(2);
+    const day = 24 * 3600_000;
+    expect(mockRunner.runs.map((r) => [r.timeRange.from.valueOf(), r.timeRange.to.valueOf()])).toEqual([
+      [0, day],
+      [day, 2 * day],
+      [2 * day, 60 * 3600_000],
+    ]);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.rowMessages).toEqual({
+      a: ['Showing the top 200 of ≈300 groups (ranked over the last 24 h)'],
+    });
+    expect(evaluateMock.mock.calls[evaluateMock.mock.calls.length - 1][1].timeRange.to.valueOf()).toBe(60 * 3600_000);
   });
 
   it('runs a grouped query uncapped when its estimate fails', async () => {

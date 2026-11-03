@@ -124,6 +124,40 @@ describe('SequentialRunner', () => {
     expect(data.series.map((s) => s.refId)).toEqual(['d']);
   });
 
+  it('reads a range longer than the slice one slice after another', () => {
+    const hours = (h: number): TimeRange => {
+      const f = dateTime(0);
+      const t = dateTime(h * 3600_000);
+      return { from: f, to: t, raw: { from: f, to: t } };
+    };
+    seq.run('k', 'p', options('abcd', hours(60)), 24 * 3600_000);
+    for (let i = 0; i < 6; i++) {
+      runner.respond(i);
+    }
+    const shape = runner.runs.map((r) => {
+      const [from, to] = [r.timeRange.from.valueOf() / 3600_000, r.timeRange.to.valueOf() / 3600_000];
+      return `${from}-${to} ${r.queries.map((q) => q.refId).join('')}`;
+    });
+    expect(shape).toEqual(['0-24 abc', '0-24 d', '24-48 abc', '24-48 d', '48-60 abc', '48-60 d']);
+    const done = outcomes[outcomes.length - 1];
+    expect(done.data?.timeRange.to.valueOf()).toBe(60 * 3600_000);
+    expect(done.data?.series).toHaveLength(12);
+
+    seq.run('k2', 'p', options('a', hours(24)), 24 * 3600_000);
+    expect(runner.runs).toHaveLength(7);
+    expect(runner.runs[6].timeRange.to.valueOf()).toBe(24 * 3600_000);
+  });
+
+  it('gives every request the whole timeout', () => {
+    seq.run('k', 'p', options('abcd'));
+    jest.advanceTimersByTime(20_000);
+    runner.respond(0);
+    jest.advanceTimersByTime(20_000);
+    expect(runner.cancel).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(10_000);
+    expect(runner.cancel).toHaveBeenCalled();
+  });
+
   it('cancels a run that takes too long', () => {
     seq.run('k', 'p', options('a'));
     jest.advanceTimersByTime(30_000);

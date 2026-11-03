@@ -1,7 +1,7 @@
 import { DataFrame, FieldType } from '@grafana/data';
 
 import { Series } from '../model/types';
-import { clean } from './series';
+import { clean, labelKey } from './series';
 
 /**
  * Bucket starts of a range query: the datasource aligns start and end down to the step (with a phase when it
@@ -36,8 +36,9 @@ function firstTimestamp(frames: DataFrame[]): number | undefined {
 }
 
 /**
- * One Series per number field of the frames: labels without `__name__`, values moved back by `shiftSec` (the
- * bucket-start convention) onto the grid; points off the grid are dropped, missing points are null.
+ * One Series per label set of the frames' number fields: labels without `__name__`, values moved back by `shiftSec`
+ * (the bucket-start convention) onto the grid; points off the grid are dropped, missing points are null. Fields with
+ * the same labels, the slices of a range read in parts, fill one series.
  */
 export function framesToSeries(frames: DataFrame[], refLetter: string, times: number[], shiftSec: number): Series[] {
   if (times.length === 0) {
@@ -45,7 +46,7 @@ export function framesToSeries(frames: DataFrame[], refLetter: string, times: nu
   }
   const start = times[0];
   const step = times.length > 1 ? times[1] - times[0] : 1;
-  const out: Series[] = [];
+  const out = new Map<string, Series>();
   for (const frame of frames) {
     const time = frame.fields.find((f) => f.type === FieldType.time);
     if (!time) {
@@ -55,17 +56,22 @@ export function framesToSeries(frames: DataFrame[], refLetter: string, times: nu
       if (field.type !== FieldType.number) {
         continue;
       }
-      const values: Array<number | null> = times.map(() => null);
+      const all = field.labels ?? {};
+      const key = labelKey(all, Object.keys(all).sort());
+      let series = out.get(key);
+      if (!series) {
+        const { __name__, ...labels } = all;
+        series = { refLetter, labels, times, values: times.map(() => null), name: '' };
+        out.set(key, series);
+      }
       for (let i = 0; i < field.values.length; i++) {
         const t = Number(time.values[i]) - shiftSec * 1000;
         const k = Math.round((t - start) / step);
         if (k >= 0 && k < times.length) {
-          values[k] = clean(field.values[i]);
+          series.values[k] = clean(field.values[i]);
         }
       }
-      const { __name__, ...labels } = field.labels ?? {};
-      out.push({ refLetter, labels, times, values, name: '' });
     }
   }
-  return out;
+  return [...out.values()];
 }

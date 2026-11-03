@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+- A time range over 24 h is read a day at a time, one request after another, and the parts are joined into one
+  graph. A request then never reads more than a day of a stream, so the panel's maximum time range can go to a week
+  without raising the backend's memory use.
+- The 30 s timeout applies to each request instead of the whole run.
+- A grouped query capped to its top 200 groups ranks them over the last 24 h when the range is longer, so that every
+  part keeps the same groups.
+
 ## 0.3.1
 
 - The query text and `q` links read `sum:X_sum{…}` and `sum:X_count{…}` of a histogram or CloudWatch metric `X` as

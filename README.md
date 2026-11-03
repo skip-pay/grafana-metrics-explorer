@@ -72,7 +72,7 @@ The plugin is not signed, so Grafana loads it only when its id is listed in `all
 ```ini
 [plugins]
 allow_loading_unsigned_plugins = skippay-metricsexplorer-panel
-preinstall = skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip
+preinstall = skippay-metricsexplorer-panel@0.4.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.4.0/skippay-metricsexplorer-panel-0.4.0.zip
 ```
 
 The same as environment variables: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS` and `GF_PLUGINS_PREINSTALL`. Both
@@ -96,7 +96,7 @@ deprecated `GF_INSTALL_PLUGINS`):
 grafana.ini:
   plugins:
     allow_loading_unsigned_plugins: skippay-metricsexplorer-panel
-    preinstall: skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip
+    preinstall: skippay-metricsexplorer-panel@0.4.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.4.0/skippay-metricsexplorer-panel-0.4.0.zip
 ```
 
 ### Docker
@@ -104,18 +104,18 @@ grafana.ini:
 ```bash
 docker run -d -p 127.0.0.1:3000:3000 \
   -e GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=skippay-metricsexplorer-panel \
-  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.3.1@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip \
+  -e GF_PLUGINS_PREINSTALL=skippay-metricsexplorer-panel@0.4.0@https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.4.0/skippay-metricsexplorer-panel-0.4.0.zip \
   grafana/grafana:13.1.1
 ```
 
 ### Grafana CLI or by hand
 
 ```bash
-grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.3.1/skippay-metricsexplorer-panel-0.3.1.zip \
+grafana cli --pluginUrl https://github.com/skip-pay/grafana-metrics-explorer/releases/download/v0.4.0/skippay-metricsexplorer-panel-0.4.0.zip \
   plugins install skippay-metricsexplorer-panel
 ```
 
-Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.3.1.zip.sha256`, unzip it into
+Or download the zip, check it with `sha256sum -c skippay-metricsexplorer-panel-0.4.0.zip.sha256`, unzip it into
 Grafana's plugin directory (`/var/lib/grafana/plugins` by default) and restart Grafana.
 
 ## Creating the dashboard
@@ -333,11 +333,12 @@ instance, gives the default.
   that do not carry the key, OpenObserve drops them. Add `key:*` to require the key on both. Grouping can return a
   series without the key next to one where it is empty; legends show them as `N/A` and `""`.
 - **Series cap.** The explorer never sends an unaggregated selector. A grouped query with more than about 200 groups
-  is narrowed to the 200 with the highest value over the whole range, and a row with more than 1000 series is not
-  drawn.
-- **Requests.** Queries run one request at a time with at most three queries each, and a run is cancelled after
-  30 s. Tag values are read over the time range, at most its last 24 h; metric names, metadata and a metric's tag
-  keys have no time window.
+  is narrowed to the 200 with the highest value over the whole range (over its last 24 h when the range is longer),
+  and a row with more than 1000 series is not drawn.
+- **Requests.** Queries run one request at a time with at most three queries each. A range over 24 h is read a day
+  at a time and joined, so no request reads more than a day of a stream. A run is cancelled when one of its requests
+  takes longer than 30 s. Tag values are read over the time range, at most its last 24 h; metric names, metadata
+  and a metric's tag keys have no time window.
 
 ## Development
 

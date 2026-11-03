@@ -29,7 +29,7 @@ export {
   renderScope,
   topLevelFilters,
 } from './filters';
-export { chooseStep, STEP_LADDER } from './step';
+export { chooseStep, MAX_SLICE_SEC, sliceSec, STEP_LADDER } from './step';
 export { capGroups, GROUP_LIMIT, isResolved } from './promql';
 export { compile } from './compile';
 export { parseQueryText, renderQueryText } from './text';

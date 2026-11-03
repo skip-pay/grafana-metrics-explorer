@@ -22,8 +22,8 @@ export interface TemplateInput {
   rollupAgg?: RollupAgg;
   offsetSec: number;
   stepSec: number;
-  /** Evaluate every selector at the end of the range (`@ end()`), for ranking groups over the whole range. */
-  atEnd?: boolean;
+  /** Evaluate every selector at the end of the range (`@ end()`) or at a unix time in seconds, for ranking groups. */
+  at?: 'end' | number;
 }
 
 export type TemplateResult = { expr: string; warnings: string[] } | { skip: string };
@@ -37,7 +37,7 @@ export const GROUP_LIMIT = 200;
 
 /**
  * The query restricted to the `limit` groups ranked highest by `rankExpr`, the same template evaluated once over
- * the whole range (`atEnd`). OpenObserve rejects `@` on a subquery, so the ranking cannot wrap `expr` itself.
+ * the whole range (`at`). OpenObserve rejects `@` on a subquery, so the ranking cannot wrap `expr` itself.
  */
 export function capGroups(expr: string, rankExpr: string, limit = GROUP_LIMIT): string {
   return `(${expr}) and topk(${limit}, ${rankExpr})`;
@@ -74,7 +74,8 @@ class Builder {
     const matchers = [...extra, ...filter];
     const braces = matchers.length > 0 ? `{${matchers.join(',')}}` : '';
     const offset = this.input.offsetSec !== 0 ? ` offset ${this.input.offsetSec}s` : '';
-    return `${stream}${braces}[${windowSec}s]${offset}${this.input.atEnd ? ' @ end()' : ''}`;
+    const at = this.input.at === undefined ? '' : ` @ ${this.input.at === 'end' ? 'end()' : this.input.at}`;
+    return `${stream}${braces}[${windowSec}s]${offset}${at}`;
   }
 
   /**

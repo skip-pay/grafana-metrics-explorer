@@ -5,12 +5,12 @@ import type { DataQuery } from '@grafana/schema';
 import { useTheme2 } from '@grafana/ui';
 
 import { getCatalog, TimeWindow } from '../catalog';
-import { compile, CompiledPlan, GROUP_LIMIT, topLevelFilters } from '../compile';
+import { compile, CompiledPlan, GROUP_LIMIT, MAX_SLICE_SEC, sliceSec, topLevelFilters } from '../compile';
 import { buildCharts, ChartModel, evaluate, EvaluateResult } from '../engine';
 import { ExplorerState, MetricInfo, ResolvedMetric, TagFilter } from '../model/types';
-import { RUN_TIMEOUT_MS, RunOutcome, SequentialRunner } from './sequential';
+import { REQUEST_TIMEOUT_MS, RunOutcome, SequentialRunner } from './sequential';
 
-export { MAX_QUERIES_PER_REQUEST, RUN_TIMEOUT_MS, SequentialRunner } from './sequential';
+export { MAX_QUERIES_PER_REQUEST, REQUEST_TIMEOUT_MS, SequentialRunner } from './sequential';
 
 /** Edits are debounced; time-range changes and the first run go out at once. */
 export const DEBOUNCE_MS = 400;
@@ -151,7 +151,8 @@ export function useExplorerData(state: ExplorerState, args: ExplorerDataArgs): E
     const delay = lastRange.current === rangeKey ? DEBOUNCE_MS : 0;
     const timer = setTimeout(() => {
       lastRange.current = rangeKey;
-      seq.run(runKey, planRef.current, toRunnerOptions(JSON.parse(runKey), timeRangeRef.current));
+      const spec: RunSpec = JSON.parse(runKey);
+      seq.run(runKey, planRef.current, toRunnerOptions(spec, timeRangeRef.current), sliceSec(spec.stepSec) * 1000);
     }, delay);
     return () => clearTimeout(timer);
   }, [runKey, from, to]);
@@ -189,7 +190,7 @@ export function useExplorerData(state: ExplorerState, args: ExplorerDataArgs): E
     if (runKey !== null && run?.key === runKey && !run.loading) {
       if (run.timedOut) {
         list.push(
-          `The query took longer than ${RUN_TIMEOUT_MS / 1000} s and was cancelled. Try a shorter time range or a narrower filter.`
+          `A request took longer than ${REQUEST_TIMEOUT_MS / 1000} s and was cancelled. Try a shorter time range or a narrower filter.`
         );
       } else if (run.dataKey === runKey) {
         list.push(...queryErrors(run.data?.errors ?? []));
@@ -219,6 +220,7 @@ export function useExplorerData(state: ExplorerState, args: ExplorerDataArgs): E
     }
     // A row without a metric needs no message; the chart area asks for one.
     const picked = new Set(state.queries.filter((q) => q.metric !== '').map((q) => q.letter));
+    const sliced = plan !== undefined && range.to - range.from > sliceSec(plan.stepSec) * 1000;
     for (const q of plan?.queries ?? []) {
       if (!picked.has(q.letter)) {
         continue;
@@ -228,7 +230,8 @@ export function useExplorerData(state: ExplorerState, args: ExplorerDataArgs): E
       }
       const count = groups.counts[q.letter];
       if (!q.skip && q.cappedExpr !== undefined && count !== undefined && count > GROUP_LIMIT) {
-        add(q.letter, `Showing the top ${GROUP_LIMIT} of ≈${count.toLocaleString('en-US')} groups`);
+        const over = sliced ? ` (ranked over the last ${MAX_SLICE_SEC / 3600} h)` : '';
+        add(q.letter, `Showing the top ${GROUP_LIMIT} of ≈${count.toLocaleString('en-US')} groups${over}`);
       }
     }
     global.push(...(evaluated?.result?.warnings ?? []));
@@ -241,7 +244,7 @@ export function useExplorerData(state: ExplorerState, args: ExplorerDataArgs): E
       }
     }
     return { rows, global: dedupe(global) };
-  }, [resolution, state.queries, plan, groups, evaluated]);
+  }, [resolution, state.queries, plan, range, groups, evaluated]);
 
   return {
     loading,

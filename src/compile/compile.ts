@@ -3,7 +3,7 @@ import { ExplorerState, FunctionCall, MetricQuery } from '../model/types';
 import { filterBranches, filterTerms, isValidLabelKey } from './filters';
 import { getFunction, isDottedModifier, normalizeArgs, timeshiftOffsetSec } from './functions';
 import { buildTemplate, capGroups, isResolved, RollupAgg, TemplateInput } from './promql';
-import { cadenceSec, chooseStep } from './step';
+import { cadenceSec, chooseStep, sliceSec } from './step';
 import { renderQueryText } from './text';
 import { CompileContext, CompiledFormula, CompiledPlan, CompiledQuery, FillMethod } from './types';
 
@@ -65,7 +65,7 @@ function compileQuery(
   state: ExplorerState,
   ctx: CompileContext,
   stepSec: number,
-  rangeSec: number
+  rank: Pick<TemplateInput, 'stepSec' | 'at'>
 ): CompiledQuery {
   const info = ctx.metrics[q.metric];
   const groupBy = effectiveGroupBy(q, state);
@@ -129,12 +129,11 @@ function compileQuery(
     return skip(template.skip);
   }
   out.warnings.push(...template.warnings);
-  // The ranking evaluates the same template once over the whole range.
-  const rank = groupBy.length > 0 ? buildTemplate({ ...input, stepSec: rangeSec, atEnd: true }) : undefined;
+  const ranked = groupBy.length > 0 ? buildTemplate({ ...input, ...rank }) : undefined;
 
   // Post functions stay in PromQL until the first one without a PromQL form; the rest run on the client.
   let expr = template.expr;
-  let capped = rank && 'expr' in rank ? capGroups(template.expr, rank.expr) : undefined;
+  let capped = ranked && 'expr' in ranked ? capGroups(template.expr, ranked.expr) : undefined;
   let serverSide = true;
   for (const call of q.functions) {
     const def = getFunction(call.name);
@@ -213,9 +212,16 @@ export function compile(state: ExplorerState, ctx: CompileContext): CompiledPlan
       errors: [`Time range is limited to ${ctx.maxRangeHours} h. Choose a shorter range.`],
     };
   }
+  // Groups are ranked by the same template evaluated once over the whole range. A range read in slices ranks by its
+  // last slice at a fixed time, so that every slice keeps the same groups and no request reads more than a slice.
+  const slice = sliceSec(stepSec);
+  const rank: Pick<TemplateInput, 'stepSec' | 'at'> =
+    rangeMs > slice * 1000
+      ? { stepSec: slice, at: Math.floor(ctx.range.to / 1000 / stepSec) * stepSec }
+      : { stepSec: Math.round(rangeMs / 1000), at: 'end' };
   return {
     stepSec,
-    queries: state.queries.map((q) => compileQuery(q, state, ctx, stepSec, Math.round(rangeMs / 1000))),
+    queries: state.queries.map((q) => compileQuery(q, state, ctx, stepSec, rank)),
     formulas,
     title: title(state, ctx),
     errors: [],
